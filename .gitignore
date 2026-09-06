@@ -1,0 +1,7 @@
+.runtime/
+outputs/
+__pycache__/
+*.pyc
+.venv*/
+desktop/target/
+.cargo-home/

@@ -1,0 +1,11 @@
+# Normalize text files in the repo; keep platform-critical endings fixed.
+* text=auto
+# Shell and Python files are piped into the LocalVoice WSL distro; CRLF breaks them.
+*.sh text eol=lf
+*.py text eol=lf
+uv.toml text eol=lf
+# PowerShell scripts are consumed on Windows only.
+*.ps1 text eol=crlf
+*.png binary
+*.wav binary
+*.tar binary

@@ -1,0 +1,115 @@
+import { VerticalBox, HorizontalBox, LineEdit, ComboBox, Button, Slider, CheckBox } from "std-widgets.slint";
+component Action inherits Rectangle {
+    in property <string> label;
+    in property <bool> accent: false;
+    callback clicked;
+    height: 32px;
+    width: 66px;
+    border-radius: 9px;
+    background: touch.pressed ? #406a5b : (touch.has-hover ? #355448 : (root.accent ? #30654e : #263e35));
+    Text {text: root.label; color: #ecf7ef; font-size: 12px; horizontal-alignment: center; vertical-alignment: center;}
+    touch := TouchArea { clicked => {root.clicked();} }
+}
+export component VoiceWindow inherits Window {
+    title: "Local Voice";
+    width: 380px;
+    height: root.has-pending ? 138px : 102px;
+    no-frame: true;
+    always-on-top: true;
+    background: #172522;
+    default-font-family: "Microsoft YaHei UI";
+    in property <string> status: "正在连接语音服务…";
+    in property <bool> recording: false;
+    in property <bool> speaking: false;
+    in property <bool> tts-enabled: true;
+    in property <bool> has-pending: false;
+    in property <float> level: 0;
+    callback record;
+    callback read;
+    callback cancel;
+    callback copy;
+    callback settings;
+    callback hide-window;
+    callback drag;
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                width: 97px;
+                HorizontalLayout {
+                    spacing: 7px;
+                    Rectangle {width: 6px; height: 6px; y: 13px; border-radius: 3px; background: root.recording ? #99dfb0 : #7c9b8b;}
+                    Text {text: "本地语音"; color: #e9f3ee; font-size: 13px; font-weight: 600; vertical-alignment: center;}
+                }
+                TouchArea { pointer-event(event) => { if (event.kind == PointerEventKind.down) {root.drag();} } }
+            }
+            Action {label: root.recording ? "结束说话" : "开始说话"; accent: true; clicked => {root.record();}}
+            Action {label: root.speaking ? "停止朗读" : (root.tts-enabled ? "朗读" : "朗读已关"); clicked => {root.read();}}
+            Action {width: 35px; label: "设置"; clicked => {root.settings();}}
+            Action {width: 25px; label: "—"; clicked => {root.hide-window();}}
+        }
+        Rectangle {height: 2px; background: #304039; Rectangle {width: parent.width * root.level; background: #9bd6b1;}}
+        HorizontalLayout {
+            spacing: 8px;
+            Text {text: root.status; color: #adc4b7; font-size: 11px; overflow: elide; vertical-alignment: center;}
+            Action {width: 35px; height: 22px; label: "取消"; clicked => {root.cancel();}}
+        }
+        if root.has-pending: HorizontalLayout {
+            Text {text: "有待提交文字 · 请复制后粘贴"; color: #ead29e; font-size: 11px; vertical-alignment: center;}
+            Action {label: "复制结果"; height: 28px; clicked => {root.copy();}}
+        }
+    }
+}
+export component SettingsWindow inherits Window {
+    title: "Local Voice settings";
+    width: 450px;
+    height: 640px;
+    default-font-family: "Microsoft YaHei UI";
+    in-out property <string> record-key;
+    in-out property <string> read-key;
+    in-out property <string> asr-url;
+    in-out property <string> tts-url;
+    in-out property <int> microphone-index: 0;
+    in-out property <int> asr-mode-index: 0;
+    in-out property <bool> continuous-dictation: false;
+    in-out property <int> voice-index: 0;
+    in-out property <float> speed: 1;
+    in property <[string]> microphones;
+    in property <[string]> voices;
+    in property <string> error;
+    in-out property <bool> tts-enabled: true;
+    in-out property <bool> auto-start-services: true;
+    in property <bool> services-busy: false;
+    in property <string> service-status: "服务尚未检查";
+    callback start-services;
+    callback stop-services;
+    callback save;
+    callback close-settings;
+    VerticalBox {
+        padding: 24px;
+        spacing: 7px;
+        Text {text: "语音设置"; font-size: 21px; font-weight: 600;}
+        CheckBox {text: "打开应用时自动启动语音服务"; checked <=> root.auto-start-services;}
+        CheckBox {text: "启用朗读（关闭并保存后释放模型内存）"; checked <=> root.tts-enabled;}
+        HorizontalLayout {spacing: 12px;
+            Button {text: "启动已保存的服务"; enabled: !root.services-busy; clicked => {root.start-services();}}
+            Button {text: "停止全部服务"; enabled: !root.services-busy; clicked => {root.stop-services();}}
+        }
+        Text {text: root.service-status; font-size: 11px; wrap: word-wrap; color: #68756d;}
+        Text {text: "识别模式保存后切换服务；连续听写开关下次录音生效。"; font-size: 12px; wrap: word-wrap;}
+        HorizontalLayout { Text {text: "说话快捷键"; width: 90px;} LineEdit {text <=> root.record-key;} }
+        HorizontalLayout { Text {text: "朗读快捷键"; width: 90px;} LineEdit {text <=> root.read-key;} }
+        CheckBox {text: "连续听写（停顿后输入，直到手动停止）"; checked <=> root.continuous-dictation;}
+        HorizontalLayout { Text {text: "识别模式"; width: 90px;} ComboBox {model: ["SenseVoice · CPU", "Qwen3-ASR 0.6B · vLLM GPU"]; current-index <=> root.asr-mode-index;} }
+        HorizontalLayout { Text {text: "麦克风"; width: 90px;} ComboBox {model: root.microphones; current-index <=> root.microphone-index;} }
+        HorizontalLayout { Text {text: "朗读音色"; width: 90px;} ComboBox {model: root.voices; current-index <=> root.voice-index;} }
+        HorizontalLayout { Text {text: "语速 " + round(root.speed*100) + "%"; width: 90px;} Slider {minimum: 0.5; maximum: 1.5; value <=> root.speed;} }
+        HorizontalLayout { Text {text: "识别服务"; width: 90px;} LineEdit {text <=> root.asr-url;} }
+        HorizontalLayout { Text {text: "朗读服务"; width: 90px;} LineEdit {text <=> root.tts-url;} }
+        Text {text: "声音使用 Windows 当前默认输出设备。"; font-size: 11px; color: #68756d;}
+        Text {text: root.error; color: #a64232; font-size: 12px; wrap: word-wrap;}
+        HorizontalLayout {spacing: 12px; Button {text: "取消"; clicked => {root.close-settings();}} Button {text: "保存"; clicked => {root.save();}} }
+    }
+}

@@ -1,0 +1,3 @@
+-r requirements-asr.txt
+qwen-asr[vllm]==0.0.6
+torchaudio

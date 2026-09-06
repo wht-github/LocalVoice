@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本地语音测试</title>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;margin:40px auto;padding:0 24px;max-width:850px;background:#f7f8fa;color:#192833}h1{font-size:30px;margin-bottom:8px}p{color:#55636f}section{background:white;padding:24px;border:1px solid #dce2e6;border-radius:14px;margin:24px 0}textarea{width:100%;box-sizing:border-box;min-height:110px;padding:12px;font:inherit;border:1px solid #b9c6ce;border-radius:8px}button,select,input{font:inherit;margin:10px 10px 10px 0;padding:9px;border-radius:6px}button{background:#146b59;color:white;border:0;padding:10px 20px;cursor:pointer}button:disabled{opacity:.5;cursor:wait}audio{display:block;width:100%;margin:14px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;color:#234438}label{display:inline-block}small{color:#64737c}
+</style>
+<h1>本地语音测试</h1>
+<p>SenseVoiceSmall 语音识别 + 本地语音合成 · 独立 LocalVoice 环境 · CPU 推理</p>
+<section><h2>文字 → 语音</h2>
+<textarea id="text" aria-label="合成文字">你好，这是本地语音测试。Hello, welcome to the local voice test.</textarea>
+<label>音色 <select id="voice"><option value="default">默认音色</option></select></label>
+<button id="speak">生成语音</button><audio id="player" controls></audio><small id="tts-status" role="status"></small>
+</section>
+<section><h2>语音 → 文字</h2>
+<p>上传 30 秒以内的 WAV、FLAC 或 OGG 文件，也可以识别上面生成的语音。</p>
+<input id="file" aria-label="上传音频" type="file" accept=".wav,.flac,.ogg,audio/wav,audio/flac,audio/ogg">
+<label>语言 <select id="language"><option value="auto">自动识别</option><option value="zh">中文</option><option value="en">英文</option></select></label>
+<button id="transcribe">识别文件</button><button id="roundtrip" disabled>识别刚生成的语音</button>
+<pre id="result" role="status"></pre></section>
+<script>
+const $=id=>document.getElementById(id);let generated=null,url=null;
+async function checked(response){if(!response.ok){let message=await response.text();try{message=JSON.parse(message).detail}catch{}throw Error(typeof message==='string'?message:JSON.stringify(message))}return response}
+fetch('/v1/audio/voices').then(checked).then(r=>r.json()).then(data=>{ $('voice').replaceChildren(...data.voices.map(v=>new Option(v.name||v.id,v.id))); }).catch(e=>{$('tts-status').textContent=e.message});
+$('speak').onclick=async()=>{ $('speak').disabled=true;$('tts-status').textContent='正在生成…';try{const r=await checked(await fetch('/v1/audio/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:$('text').value,voice:$('voice').value})}));generated=await r.blob();if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(generated);$('player').src=url;$('roundtrip').disabled=false;$('tts-status').textContent=`合成 ${r.headers.get('X-Inference-Seconds')} 秒 · 音频 ${r.headers.get('X-Audio-Seconds')} 秒`;}catch(e){$('tts-status').textContent=e.message}finally{$('speak').disabled=false}};
+async function transcribe(blob){if(!blob){$('result').textContent='请先选择或生成音频。';return}$('transcribe').disabled=true;$('roundtrip').disabled=true;$('result').textContent='正在识别…';try{const form=new FormData();form.append('file',blob,'audio.wav');form.append('language',$('language').value);const r=await checked(await fetch('/test/transcribe',{method:'POST',body:form}));const data=await r.json();$('result').textContent=data.text+`\n\n语言：${data.language} · 识别耗时：${data.inference_seconds} 秒 · 音频：${data.duration} 秒`;}catch(e){$('result').textContent=e.message}finally{$('transcribe').disabled=false;$('roundtrip').disabled=!generated}}
+$('transcribe').onclick=()=>transcribe($('file').files[0]);$('roundtrip').onclick=()=>transcribe(generated);
+</script></html>
