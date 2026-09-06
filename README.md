@@ -80,6 +80,38 @@ wsl -d LocalVoice -u root --cd / --exec bash /opt/local-voice-app/scripts/config
 模型和语言前处理资源首次下载后缓存在本机。
 验证完成后 `scripts/finalize.sh` 会把 SenseVoice 配置成直接读取本地目录，并启用 Hugging Face 离线模式。
 
+## 在新 Windows 机器上部署
+
+前置要求：Windows 10 22H2 / 11、WSL2、Git、Rust 工具链（编译桌面端）。使用 Qwen GPU 模式需要 NVIDIA 显卡并已安装 Windows 侧显卡驱动（WSL 内不要另装驱动）。
+
+```powershell
+# 1. 克隆仓库后，创建专用发行版。名字必须是 LocalVoice，脚本有实例名检查。
+wsl --install Ubuntu-24.04 --name LocalVoice
+
+# 2. 把项目文件传入实例并注册 systemd 服务（主动传输，不依赖 /mnt）。
+.\voice.ps1 deploy
+
+# 3. 实例内基础初始化（root）：换镜像源、装系统包、建 voice 用户、启用 systemd。
+wsl -d LocalVoice -u root -- bash /opt/local-voice-app/scripts/provision.sh
+
+# 4. Python 环境与 CPU 模型（voice 用户）。
+wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/setup.sh
+
+# 5. （可选，Qwen GPU 模式）独立 GPU 环境与模型下载。
+wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/install-asr-gpu.sh
+wsl -d LocalVoice -u voice -- bash -c "source /opt/local-voice-app/scripts/env.sh && \"$VOICE_RUNTIME\"/asr-gpu/bin/python /opt/local-voice-app/scripts/download-qwen-asr.py"
+
+# 6. 首次启动服务（SenseVoice 模型此时经镜像自动下载），就绪后固化离线模型路径。
+.\voice.ps1 start
+wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/finalize.sh
+
+# 7. 编译并启动桌面客户端。
+.\desktop.ps1 build
+.\desktop.ps1 start
+```
+
+（可选）MeloTTS 中文音色：`wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/install-melo.sh`，再在桌面设置中切换。镜像端点等环境值见 `scripts/env.sh` 与 `scripts/configure-mirrors.sh`。GPU 模式的显存预算与已知限制见 [STT 模式](docs/asr-gpu-and-vllm.md)。
+
 ## 重新部署
 
 仅对 `LocalVoice` 操作，脚本对基础环境配置与服务安装做了实例名检查。
