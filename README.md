@@ -1,14 +1,14 @@
 # 本地语音服务：SenseVoiceSmall + MeloTTS
 
-专用 WSL2 实例 `LocalVoice`，Ubuntu 24.04，虚拟磁盘位于 `D:\WSL\LocalVoice`。
-当前使用 **SenseVoiceSmall / FunASR（CPU）+ MeloTTS 中文 / 中英混读（CPU）**。旧 Kokoro 环境保留用于回退，不同时加载。
-Qwen3-ASR 与 vLLM 暂未安装；SenseVoice 使用 FunASR 推理后端。
+识别默认在 **Windows 本机原生运行**：桌面客户端直接启动原生 Python 进程加载 SenseVoiceSmall / FunASR（CPU），不依赖 WSL、不占 WSL 内存。
+朗读（TTS）默认关闭；启用时使用专用 WSL2 实例 `LocalVoice`（Ubuntu 24.04，虚拟磁盘位于 `D:\WSL\LocalVoice`）中的 MeloTTS。旧 Kokoro 环境保留用于回退，不同时加载。
+Qwen3-ASR vLLM 曾在 WSL 中验证过（数据见 [STT 模式](docs/asr-gpu-and-vllm.md)），目前从桌面端移除，脚本保留供手动实验。
 
 ## 打开和管理
 
-Windows 原生悬浮窗已实现，使用 Rust + Slint：运行 `./desktop.ps1` 启动服务和客户端。默认 `Ctrl+Alt+Space` 开始/结束听写，`Ctrl+Alt+R` 朗读选中文字或停止播放。使用说明和兼容边界见 [桌面客户端](desktop/README.md)。
+Windows 原生悬浮窗使用 Rust + Slint：运行 `./desktop.ps1` 启动客户端（按已保存设置启动识别进程）。默认 `Ctrl+Alt+Space` 开始/结束听写，`Ctrl+Alt+R` 朗读选中文字或停止播放。使用说明和兼容边界见 [桌面客户端](desktop/README.md)。
 
-也可直接打开发布 EXE。设置中可选择随应用启动服务、单独关闭朗读，以及一键停止全部服务。关闭朗读并保存后退出 TTS 模型进程，听写不受影响。启停由 Rust 在后台直接调用专用 WSL 的服务管理器，不新增 HTTP 管理端口。详见 [Melo 部署与资源实测](docs/melo-and-service-control.md)。
+也可直接打开发布 EXE。设置中可选择随应用启动服务、单独关闭朗读，以及一键停止全部服务。关闭朗读并保存后退出 TTS 模型进程，听写不受影响；识别进程的启停完全在 Windows 本机完成。详见 [Melo 部署与资源实测](docs/melo-and-service-control.md)。
 
 在此项目的 PowerShell 中运行：
 
@@ -82,35 +82,39 @@ wsl -d LocalVoice -u root --cd / --exec bash /opt/local-voice-app/scripts/config
 
 ## 在新 Windows 机器上部署
 
-前置要求：Windows 10 22H2 / 11、WSL2、Git、Rust 工具链（编译桌面端）。使用 Qwen GPU 模式需要 NVIDIA 显卡并已安装 Windows 侧显卡驱动（WSL 内不要另装驱动）。
+默认部署只需 Windows 本机环境：识别（SenseVoice CPU）以原生 Python 进程运行，不启动 WSL。WSL 仅在需要朗读（TTS）或手动实验 Qwen GPU 时安装。
+
+前置要求：Windows 10 22H2 / 11、Git、Rust 工具链（编译桌面端）、Python 3.10–3.13。
 
 ```powershell
-# 1. 克隆仓库后，创建专用发行版。名字必须是 LocalVoice，脚本有实例名检查。
-wsl --install Ubuntu-24.04 --name LocalVoice
+# 1. 安装原生识别环境（CPU torch + funasr，venv 建在 %LOCALAPPDATA%\LocalVoice\venv）。
+pwsh -NoProfile -File scripts/setup-native-asr.ps1
 
-# 2. 把项目文件传入实例并注册 systemd 服务（主动传输，不依赖 /mnt）。
-.\voice.ps1 deploy
-
-# 3. 实例内基础初始化（root）：换镜像源、装系统包、建 voice 用户、启用 systemd。
-wsl -d LocalVoice -u root -- bash /opt/local-voice-app/scripts/provision.sh
-
-# 4. Python 环境与 CPU 模型（voice 用户）。
-wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/setup.sh
-
-# 5. （可选，Qwen GPU 模式）独立 GPU 环境与模型下载。
-wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/install-asr-gpu.sh
-wsl -d LocalVoice -u voice -- bash -c "source /opt/local-voice-app/scripts/env.sh && \"$VOICE_RUNTIME\"/asr-gpu/bin/python /opt/local-voice-app/scripts/download-qwen-asr.py"
-
-# 6. 首次启动服务（SenseVoice 模型此时经镜像自动下载），就绪后固化离线模型路径。
-.\voice.ps1 start
-wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/finalize.sh
-
-# 7. 编译并启动桌面客户端。
+# 2. 编译并启动桌面客户端。首次识别启动时 SenseVoice 模型经 HF 镜像自动下载。
 .\desktop.ps1 build
 .\desktop.ps1 start
 ```
 
-（可选）MeloTTS 中文音色：`wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/install-melo.sh`，再在桌面设置中切换。镜像端点等环境值见 `scripts/env.sh` 与 `scripts/configure-mirrors.sh`。GPU 模式的显存预算与已知限制见 [STT 模式](docs/asr-gpu-and-vllm.md)。
+听写即开即用。需要朗读或想实验 Qwen 时再装 WSL 部分：
+
+```powershell
+# 创建专用发行版。名字必须是 LocalVoice，脚本有实例名检查。
+wsl --install Ubuntu-24.04 --name LocalVoice
+
+# 传入项目文件并注册 systemd 服务（主动传输，不依赖 /mnt）。
+.\voice.ps1 deploy
+
+# 实例内基础初始化（root）：换镜像源、装系统包、建 voice 用户、启用 systemd。
+wsl -d LocalVoice -u root -- bash /opt/local-voice-app/scripts/provision.sh
+
+# TTS 环境与模型（voice 用户）；首次启动 TTS 后可运行 finalize.sh 固化离线路径。
+wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/setup.sh
+wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/finalize.sh
+```
+
+（可选）MeloTTS 中文音色：`wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/install-melo.sh`，再在桌面设置中切换。镜像端点等环境值见 `scripts/env.sh` 与 `scripts/configure-mirrors.sh`。
+
+Qwen3-ASR vLLM 目前已从桌面端移除（界面不再提供切换），WSL 侧脚本保留供手动实验，见 [STT 模式](docs/asr-gpu-and-vllm.md)。
 
 ## 重新部署
 

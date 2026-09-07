@@ -211,6 +211,7 @@ fn controller(
                     c.stop(false);
                 }
                 generation.fetch_add(1, Ordering::SeqCst);
+                runtime::native_stop();
                 break;
             }
             Event::Health(result) => {
@@ -572,12 +573,6 @@ fn controller(
             Event::Configure(next) => {
                 let result = (|| -> Result<()> {
                     next.validate()?;
-                    if config.asr_mode != next.asr_mode && (recording || stopping || inflight > 0) {
-                        anyhow::bail!("请先结束听写并等待结果，再切换识别模式");
-                    }
-                    if config.asr_mode != next.asr_mode && !runtime::managed(&next) {
-                        anyhow::bail!("识别模式切换仅支持本机默认服务地址");
-                    }
                     native::hotkey(&next.record_key)?;
                     native::hotkey(&next.read_key)?;
                     native::unregister_keys();
@@ -596,7 +591,6 @@ fn controller(
                     Ok(()) => {
                         keys_ready = true;
                         let tts_changed = config.tts_enabled != next.tts_enabled;
-                        let asr_changed = config.asr_mode != next.asr_mode;
                         config = next;
                         *shared.lock().unwrap() = config.clone();
                         let enabled = config.tts_enabled;
@@ -606,12 +600,6 @@ fn controller(
                                 generation.fetch_add(1, Ordering::SeqCst);
                                 speaking = false;
                             }
-                        }
-                        if asr_changed && tts_changed {
-                            manager.send(runtime::Operation::Start(config.clone()));
-                        } else if asr_changed {
-                            manager.send(runtime::Operation::Asr(config.clone()));
-                        } else if tts_changed {
                             manager.send(runtime::Operation::Tts(config.clone()));
                         }
                         status(&ui, "设置已保存；新任务使用新设置");

@@ -72,7 +72,6 @@ export component SettingsWindow inherits Window {
     in-out property <string> asr-url;
     in-out property <string> tts-url;
     in-out property <int> microphone-index: 0;
-    in-out property <int> asr-mode-index: 0;
     in-out property <bool> continuous-dictation: false;
     in-out property <int> voice-index: 0;
     in-out property <float> speed: 1;
@@ -98,11 +97,10 @@ export component SettingsWindow inherits Window {
             Button {text: "停止全部服务"; enabled: !root.services-busy; clicked => {root.stop-services();}}
         }
         Text {text: root.service-status; font-size: 11px; wrap: word-wrap; color: #68756d;}
-        Text {text: "识别模式保存后切换服务；连续听写开关下次录音生效。"; font-size: 12px; wrap: word-wrap;}
+        Text {text: "识别在本机原生运行（SenseVoice CPU）；连续听写开关下次录音生效。"; font-size: 12px; wrap: word-wrap;}
         HorizontalLayout { Text {text: "说话快捷键"; width: 90px;} LineEdit {text <=> root.record-key;} }
         HorizontalLayout { Text {text: "朗读快捷键"; width: 90px;} LineEdit {text <=> root.read-key;} }
         CheckBox {text: "连续听写（停顿后输入，直到手动停止）"; checked <=> root.continuous-dictation;}
-        HorizontalLayout { Text {text: "识别模式"; width: 90px;} ComboBox {model: ["SenseVoice · CPU", "Qwen3-ASR 0.6B · vLLM GPU"]; current-index <=> root.asr-mode-index;} }
         HorizontalLayout { Text {text: "麦克风"; width: 90px;} ComboBox {model: root.microphones; current-index <=> root.microphone-index;} }
         HorizontalLayout { Text {text: "朗读音色"; width: 90px;} ComboBox {model: root.voices; current-index <=> root.voice-index;} }
         HorizontalLayout { Text {text: "语速 " + round(root.speed*100) + "%"; width: 90px;} Slider {minimum: 0.5; maximum: 1.5; value <=> root.speed;} }

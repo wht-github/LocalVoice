@@ -56,7 +56,7 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         if !matches!(
             self.asr_mode.as_str(),
-            "sensevoice-cpu" | "qwen-vllm"
+            "sensevoice-cpu"
         ) {
             bail!("识别模式无效");
         }
@@ -113,27 +113,26 @@ mod tests {
         assert!(restored.continuous_dictation);
     }
     #[test]
-    fn gpu_modes_validate_and_old_settings_default_to_cpu() {
+    fn native_mode_validates_and_old_settings_default_to_cpu() {
         let old: Config = serde_json::from_str("{}").unwrap();
         assert_eq!(old.asr_mode, "sensevoice-cpu");
-        for mode in ["sensevoice-cpu", "qwen-vllm"] {
-            let config = Config {
-                asr_mode: mode.into(),
-                ..Config::default()
-            };
-            config.validate().unwrap();
-            let restored: Config =
-                serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
-            assert_eq!(restored.asr_mode, mode);
+        let config = Config::default();
+        config.validate().unwrap();
+        let restored: Config =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        assert_eq!(restored.asr_mode, "sensevoice-cpu");
+        // Historical values (WSL qwen-vllm, removed sensevoice-gpu) no longer validate;
+        // load() rejects them and the app falls back to defaults.
+        for mode in ["qwen-vllm", "sensevoice-gpu", "other"] {
+            assert!(
+                Config {
+                    asr_mode: mode.into(),
+                    ..Config::default()
+                }
+                .validate()
+                .is_err()
+            );
         }
-        assert!(
-            Config {
-                asr_mode: "other".into(),
-                ..Config::default()
-            }
-            .validate()
-            .is_err()
-        );
     }
     #[test]
     fn disabled_reading_survives_save_roundtrip() {

@@ -1,11 +1,25 @@
 # STT 模式
 
-桌面客户端设置中的“识别模式”控制专用 `LocalVoice` 实例的 ASR 服务。可选：
+**当前状态**：桌面端仅保留 `SenseVoice · CPU`，且以 Windows 原生 Python 进程运行（`scripts/setup-native-asr.ps1` 安装环境），默认完全不启动 WSL。Qwen3-ASR vLLM 已从桌面端界面移除，以下 WSL 流程保留供手动实验。
 
-- `SenseVoice · CPU`：当前默认模式，使用已有 FunASR 环境和模型。
-- `Qwen3-ASR 0.6B · vLLM GPU`：使用 Qwen 官方 `qwen-asr[vllm]` 后端和 vLLM，模型通过 Hugging Face 镜像下载到 LocalVoice 内部，运行在独立 `asr-gpu` Python 环境。
+## Qwen3-ASR vLLM（WSL，手动实验）
 
-GPU 环境不会替换 CPU 环境。切换时客户端停止 ASR，修改专用服务配置，启动新后端并等待 `/health`；启动失败会恢复上一个后端。切换不能在录音、识别或等待输入结果时进行。
+在专用 `LocalVoice` 实例内运行，使用 Qwen 官方 `qwen-asr[vllm]` 后端，模型通过 Hugging Face 镜像下载到实例内部，运行在独立 `asr-gpu` Python 环境。
+
+手动使用：先停止桌面端的原生识别（设置中“停止全部服务”），再在 WSL 内启动：
+
+```powershell
+wsl -d LocalVoice -u root -- bash /opt/local-voice-app/scripts/select-asr.sh qwen-vllm
+```
+
+服务就绪后监听 `127.0.0.1:8001`，与桌面端同端口；实验结束后切回 `sensevoice-cpu` 并停止该服务，避免与原生识别抢占端口。
+
+安装（如尚未装好 GPU 环境）：
+
+```powershell
+wsl -d LocalVoice -u voice -- bash /opt/local-voice-app/scripts/install-asr-gpu.sh
+wsl -d LocalVoice -u voice -- bash -c "source /opt/local-voice-app/scripts/env.sh && \"$VOICE_RUNTIME\"/asr-gpu/bin/python /opt/local-voice-app/scripts/download-qwen-asr.py"
+```
 
 Qwen3-ASR 官方提供 vLLM 后端和 `qwen-asr[vllm]` 安装方式，0.6B 适合 6GB 显存的尝试。当前 vLLM 参数：显存预算 60%（按总显存计算，需扣除 Windows 侧桌面应用的动态占用）、`max_model_len` 3072、并发 1、`enforce_eager`（禁用 torch.compile 和 CUDA Graph，节省约 2 GB 显存并避免编译期显存波动）。vLLM 自身占用约 2.4 GB。若启动报 "No available memory for the cache blocks"，通常是 Windows 侧显存基线上涨挤压了预算，可适当下调 `max_model_len` 或上调预算。
 
