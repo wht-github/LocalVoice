@@ -54,10 +54,7 @@ impl Config {
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
-        if !matches!(
-            self.asr_mode.as_str(),
-            "sensevoice-cpu"
-        ) {
+        if !matches!(self.asr_mode.as_str(), "sensevoice-cpu" | "qwen-native") {
             bail!("识别模式无效");
         }
         for address in [&self.asr_url, &self.tts_url] {
@@ -121,6 +118,14 @@ mod tests {
         let restored: Config =
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert_eq!(restored.asr_mode, "sensevoice-cpu");
+        let qwen = Config {
+            asr_mode: "qwen-native".into(),
+            ..Config::default()
+        };
+        qwen.validate().unwrap();
+        let restored: Config =
+            serde_json::from_str(&serde_json::to_string(&qwen).unwrap()).unwrap();
+        assert_eq!(restored.asr_mode, "qwen-native");
         // Historical values (WSL qwen-vllm, removed sensevoice-gpu) no longer validate;
         // load() rejects them and the app falls back to defaults.
         for mode in ["qwen-vllm", "sensevoice-gpu", "other"] {

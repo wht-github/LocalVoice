@@ -4,6 +4,10 @@
 朗读（TTS）默认关闭；启用时使用专用 WSL2 实例 `LocalVoice`（Ubuntu 24.04，虚拟磁盘位于 `D:\WSL\LocalVoice`）中的 MeloTTS。旧 Kokoro 环境保留用于回退，不同时加载。
 Qwen3-ASR vLLM 曾在 WSL 中验证过（数据见 [STT 模式](docs/asr-gpu-and-vllm.md)），目前从桌面端移除，脚本保留供手动实验。
 
+Windows 原生 NVIDIA GPU 使用独立的 PyTorch CUDA / Transformers 环境，见 [Qwen 原生说明](docs/qwen-native-windows.md)。悬浮窗设置中可选择“Qwen · NVIDIA GPU”，保存后重新加载模型；也可通过独立脚本转写本地录音并记录耗时、显存。
+
+想动手修改 GPU 算子，可运行 `.\tilelang-lab.ps1`，进入独立的 [PyTorch + TileLang 实验](docs/tilelang-lab.md)：包含可运行加法基线、正确性检查、计时和一行算子融合练习。
+
 ## 打开和管理
 
 Windows 原生悬浮窗使用 Rust + Slint：运行 `./desktop.ps1` 启动客户端（按已保存设置启动识别进程）。默认 `Ctrl+Alt+Space` 开始/结束听写，`Ctrl+Alt+R` 朗读选中文字或停止播放。使用说明和兼容边界见 [桌面客户端](desktop/README.md)。

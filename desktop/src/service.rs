@@ -53,6 +53,12 @@ pub fn ready(config: &Config) -> Result<()> {
         if value["ready"] != true {
             bail!("模型仍在加载");
         }
+        if url == &config.asr_url
+            && crate::runtime::managed(config)
+            && value["mode"] != config.asr_mode
+        {
+            bail!("当前识别服务与已保存模型不一致，请启动已保存的服务");
+        }
     }
     Ok(())
 }

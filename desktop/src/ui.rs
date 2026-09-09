@@ -240,6 +240,11 @@ pub fn run() -> Result<()> {
             settings.set_record_key(config.record_key.clone().into());
             settings.set_read_key(config.read_key.clone().into());
             settings.set_asr_url(config.asr_url.clone().into());
+            settings.set_asr_mode_index(if config.asr_mode == "qwen-native" {
+                1
+            } else {
+                0
+            });
             settings.set_tts_url(config.tts_url.clone().into());
             settings.set_speed(config.speed);
             settings.set_continuous_dictation(config.continuous_dictation);
@@ -344,6 +349,12 @@ pub fn run() -> Result<()> {
                 cfg.record_key = s.get_record_key().to_string();
                 cfg.read_key = s.get_read_key().to_string();
                 cfg.asr_url = s.get_asr_url().to_string();
+                cfg.asr_mode = if s.get_asr_mode_index() == 1 {
+                    "qwen-native"
+                } else {
+                    "sensevoice-cpu"
+                }
+                .into();
                 cfg.tts_url = s.get_tts_url().to_string();
                 cfg.speed = s.get_speed();
                 cfg.continuous_dictation = s.get_continuous_dictation();

@@ -509,6 +509,45 @@ pub fn restore_check(
     });
 }
 
+pub fn qwen_runtime_check(audio: &str, output: &str) -> Result<()> {
+    use crate::runtime::{Operation, apply};
+    let config = crate::config::Config {
+        asr_mode: "qwen-native".into(),
+        tts_enabled: false,
+        ..crate::config::Config::default()
+    };
+    let result = (|| -> Result<serde_json::Value> {
+        let startup = apply(Operation::Start(config.clone()), || false)?;
+        crate::service::ready(&config)?;
+        apply(Operation::Start(config.clone()), || false)?;
+        let client = crate::service::client()?;
+        let transcript = crate::service::transcribe(&client, &config, std::fs::read(audio)?)?;
+        ensure!(!transcript.is_empty(), "Qwen returned empty transcription");
+        let health: serde_json::Value = client
+            .get(format!("{}/health", config.asr_url))
+            .send()?
+            .json()?;
+        ensure!(
+            health["mode"] == "qwen-native" && health["device"] == "cuda:0",
+            "Wrong backend"
+        );
+        apply(Operation::Stop, || false)?;
+        ensure!(
+            client
+                .get(format!("{}/health", config.asr_url))
+                .send()
+                .is_err(),
+            "Owned ASR remained online after stop"
+        );
+        Ok(
+            serde_json::json!({"startup":startup,"health":health,"text":transcript,"stop_verified":true}),
+        )
+    })();
+    crate::runtime::native_stop();
+    std::fs::write(output, serde_json::to_vec_pretty(&result?)?)?;
+    Ok(())
+}
+
 pub fn runtime_check(output: &str) -> Result<()> {
     use crate::runtime::{Operation, apply};
     let config = crate::config::Config::load()?;

@@ -54,6 +54,7 @@ impl Manager {
 
 struct NativeAsr {
     child: Option<Child>,
+    mode: String,
 }
 static NATIVE: OnceLock<Mutex<NativeAsr>> = OnceLock::new();
 // Whether this process has started the WSL TTS unit, so Stop avoids booting a
@@ -79,8 +80,10 @@ fn server_script() -> Result<PathBuf> {
         bail!("无法定位程序目录");
     };
     // Repo layout desktop/target/release plus a flat exe-next-to-script install.
-    for candidate in [dir.join("asr_server.py"), dir.join("..").join("..").join("..").join("asr_server.py")]
-    {
+    for candidate in [
+        dir.join("asr_server.py"),
+        dir.join("..").join("..").join("..").join("asr_server.py"),
+    ] {
         if candidate.is_file() {
             return Ok(candidate);
         }
@@ -101,25 +104,50 @@ fn native_health(config: &Config) -> Option<serde_json::Value> {
         .ok()
 }
 fn native_start(config: &Config) -> Result<()> {
-    let mut guard = NATIVE.get_or_init(|| Mutex::new(NativeAsr { child: None })).lock().unwrap();
+    let script = server_script()?.canonicalize()?;
+    let root = script.parent().context("无法定位识别项目目录")?;
+    let python = if config.asr_mode == "qwen-native" {
+        root.join(".venv-qwen").join("Scripts").join("python.exe")
+    } else {
+        venv_python()
+    };
+    if !python.is_file() {
+        bail!(
+            "识别环境未安装（{}）；请运行对应的 setup 安装脚本",
+            python.display()
+        );
+    }
+    let mut guard = NATIVE
+        .get_or_init(|| {
+            Mutex::new(NativeAsr {
+                child: None,
+                mode: String::new(),
+            })
+        })
+        .lock()
+        .unwrap();
+    let same_mode = guard.mode == config.asr_mode;
     if let Some(child) = guard.child.as_mut() {
         if child.try_wait()?.is_none() {
-            return Ok(());
+            if same_mode {
+                return Ok(());
+            }
+            child.kill().context("无法停止旧识别模型")?;
+            child.wait()?;
         }
     }
+    guard.child = None;
     // Another server may already own the port (e.g. WSL services from an old setup).
     if let Some(health) = native_health(config) {
         if health["ready"] == true {
-            if health["mode"] == "sensevoice-cpu" {
+            if health["mode"] == config.asr_mode {
                 return Ok(());
             }
-            bail!("识别端口已被其他识别服务占用（{} 模式）；请先停止 WSL 中的服务", health["mode"]);
+            bail!(
+                "识别端口被其他进程占用（{} 模式）；请先从启动它的程序停止服务",
+                health["mode"]
+            );
         }
-    }
-    let script = server_script()?;
-    let python = venv_python();
-    if !python.is_file() {
-        bail!("原生识别环境未安装（{})", python.display());
     }
     let log_dir = std::env::var_os("LOCALAPPDATA")
         .map(|dir| PathBuf::from(dir).join("LocalVoice"))
@@ -138,10 +166,14 @@ fn native_start(config: &Config) -> Result<()> {
     let mut command = Command::new(&python);
     command
         .arg("-u")
+        .args(["-X", "utf8"])
         .arg(&script)
-        .env("ASR_BACKEND", "sensevoice-cpu")
+        .env("ASR_BACKEND", &config.asr_mode)
         .env("ASR_THREADS", "4")
-        .env("HF_ENDPOINT", std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://hf-mirror.com".into()))
+        .env(
+            "HF_ENDPOINT",
+            std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://hf-mirror.com".into()),
+        )
         .env("PYTHONUNBUFFERED", "1")
         .current_dir(script.parent().unwrap_or(std::path::Path::new(".")))
         .creation_flags(0x08000000)
@@ -152,6 +184,7 @@ fn native_start(config: &Config) -> Result<()> {
         .spawn()
         .with_context(|| format!("无法启动原生识别进程（{}）", python.display()))?;
     guard.child = Some(child);
+    guard.mode = config.asr_mode.clone();
     Ok(())
 }
 pub fn native_stop() {
@@ -273,22 +306,43 @@ pub fn apply(operation: Operation, cancelled: impl Fn() -> bool) -> Result<Strin
         if cancelled() {
             return Ok("正在应用新的服务设置…".into());
         }
+        if let Some(lock) = NATIVE.get() {
+            let mut guard = lock.lock().unwrap();
+            if let Some(child) = guard.child.as_mut() {
+                if let Some(status) = child.try_wait()? {
+                    bail!(
+                        "识别进程启动失败（{status}）；请查看 %LOCALAPPDATA%/LocalVoice/native-asr.log"
+                    );
+                }
+            }
+        }
         let ready = urls.iter().all(|url| {
             client
                 .get(format!("{url}/health"))
                 .send()
                 .and_then(|r| r.error_for_status())
                 .and_then(|r| r.json::<serde_json::Value>())
-                .map(|v| v["ready"] == true)
+                .map(|v| {
+                    v["ready"] == true
+                        && (*url != config.asr_url.trim_end_matches('/')
+                            || v["mode"] == config.asr_mode)
+                })
                 .unwrap_or(false)
         });
         if ready {
-            return Ok(if config.tts_enabled {
-                "朗读已就绪；识别为本机原生 SenseVoice"
+            let name = if config.asr_mode == "qwen-native" {
+                "Qwen · NVIDIA GPU"
             } else {
-                "识别已就绪 · SenseVoice（本机原生）；朗读已关闭"
-            }
-            .into());
+                "SenseVoice · CPU"
+            };
+            return Ok(format!(
+                "识别已就绪 · {name}；朗读{}",
+                if config.tts_enabled {
+                    "已开启"
+                } else {
+                    "已关闭"
+                }
+            ));
         }
         if Instant::now() >= deadline {
             bail!("服务在十分钟内未就绪；首次启动需下载模型，请查看 native-asr.log");

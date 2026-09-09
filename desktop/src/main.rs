@@ -573,6 +573,9 @@ fn controller(
             Event::Configure(next) => {
                 let result = (|| -> Result<()> {
                     next.validate()?;
+                    if next.asr_mode != config.asr_mode && (recording || inflight > 0 || stopping) {
+                        anyhow::bail!("请先结束听写并等待识别完成，再更换识别模型");
+                    }
                     native::hotkey(&next.record_key)?;
                     native::hotkey(&next.read_key)?;
                     native::unregister_keys();
@@ -591,6 +594,7 @@ fn controller(
                     Ok(()) => {
                         keys_ready = true;
                         let tts_changed = config.tts_enabled != next.tts_enabled;
+                        let asr_changed = config.asr_mode != next.asr_mode;
                         config = next;
                         *shared.lock().unwrap() = config.clone();
                         let enabled = config.tts_enabled;
@@ -600,6 +604,10 @@ fn controller(
                                 generation.fetch_add(1, Ordering::SeqCst);
                                 speaking = false;
                             }
+                        }
+                        if asr_changed {
+                            manager.send(runtime::Operation::Start(config.clone()));
+                        } else if tts_changed {
                             manager.send(runtime::Operation::Tts(config.clone()));
                         }
                         status(&ui, "设置已保存；新任务使用新设置");
@@ -623,6 +631,12 @@ fn controller(
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("--qwen-runtime-check") => verification::qwen_runtime_check(
+            args.get(2)
+                .ok_or_else(|| anyhow::anyhow!("input WAV required"))?,
+            args.get(3)
+                .ok_or_else(|| anyhow::anyhow!("report path required"))?,
+        ),
         Some("--manual-asr-check") => verification::manual_asr(
             args.get(2)
                 .ok_or_else(|| anyhow::anyhow!("input WAV required"))?,
