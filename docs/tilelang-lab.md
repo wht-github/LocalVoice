@@ -68,6 +68,23 @@ C = max(A + B, 0)
 
 启动时可能看到 TVM 的 `Failed to JIT torch c dlpack extension` 警告。当前 NVRTC 路径使用调用者分配的 torch 张量，已验证可以正常执行；该警告涉及可选的张量分配桥接。这里没有修改第三方包来隐藏警告。
 
+## 采集 CPU / GPU 时间线
+
+完成融合练习后，在项目根目录运行：
+
+```powershell
+.\.venv-tilelang\Scripts\python.exe experiments/tilelang/profile_lab.py
+```
+
+固定百万元素、block=256、128 个线程。程序先预热并检查结果，再分别采集 PyTorch 和 TileLang 各 5 次调用，并交换顺序重复一轮。结果保存到 `outputs/tilelang/profile-时间戳/`：
+
+- `summary.md`：内核数量、GPU 内核时间、CPU 提交范围耗时和调用之间的 GPU 空隙。
+- `summary.json`：完整逐次数据，包括采集开始时明显偏慢的第一次调用；汇总中位数只使用第 2～5 次。
+- `*.trace.json`：Chrome Trace 格式的时间线；注意区分 CPU 的 `user_annotation` 与同名的 `gpu_user_annotation`。
+- `*.table.txt`：Profiler 算子汇总；TileLang 直接调用 CUDA driver，不一定表现为普通的 aten 算子。
+
+Profiler 会增加开销，因此用它定位耗时，而用原来的无 Profiler 测试评估实际调用速度。CPU 提交与 GPU 执行可以重叠，不能直接把两者相加。GPU 空隙可能包括提交、调度等等待，不能全部归因于 Python。
+
 ## 如何走到 Qwen 优化
 
 完成这个练习后，下一步是对现有 Qwen 推理做性能剖析，确认实际耗时的算子、形状和数据类型。再选择一个真实热点（例如归一化或激活融合，具体以测量为准），建立 PyTorch 对照、误差检查与可切换实现，最后使用同一组录音比较识别结果和整体延迟。

@@ -29,4 +29,5 @@ def add_relu_exercise(A, B, C, block: int = 256):
             if idx < N:
                 # TODO: change this line to max(A[idx] + B[idx], 0).
                 # Hint: TileLang provides T.max and T.float32(0).
-                C[idx] = A[idx] + B[idx]
+                # C[idx] = A[idx] + B[idx]
+                C[idx] = T.max(A[idx] + B[idx], T.float32(0))

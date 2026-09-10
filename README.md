@@ -8,6 +8,8 @@ Windows 原生 NVIDIA GPU 使用独立的 PyTorch CUDA / Transformers 环境，�
 
 想动手修改 GPU 算子，可运行 `.\tilelang-lab.ps1`，进入独立的 [PyTorch + TileLang 实验](docs/tilelang-lab.md)：包含可运行加法基线、正确性检查、计时和一行算子融合练习。
 
+下一项 [RMSNorm 单项实验](docs/rmsnorm-lab.md) 用 `.\rmsnorm-lab.ps1 --baseline` 运行 Qwen 原始基线；只修改 RMSNorm 后再与它对照，不叠加其他推理优化。
+
 ## 打开和管理
 
 Windows 原生悬浮窗使用 Rust + Slint：运行 `./desktop.ps1` 启动客户端（按已保存设置启动识别进程）。默认 `Ctrl+Alt+Space` 开始/结束听写，`Ctrl+Alt+R` 朗读选中文字或停止播放。使用说明和兼容边界见 [桌面客户端](desktop/README.md)。
