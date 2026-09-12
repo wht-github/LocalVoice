@@ -1,4 +1,4 @@
-"""Download the pinned Qwen3-ASR 1.7B Q8 decoder and BF16 audio encoder."""
+"""Download a pinned Qwen3-ASR Q8 decoder and BF16 audio encoder."""
 import argparse
 import hashlib
 import json
@@ -48,8 +48,18 @@ def download(item):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--size', choices=['0.6B', '1.7B'], default='1.7B')
     parser.add_argument('--with-bf16', action='store_true', help='Also download the source for local quantization.')
     args = parser.parse_args()
+    if args.size == '0.6B':
+        DEST = ROOT / '.runtime/models/Qwen3-ASR-0.6B-GGUF'
+        REPO = 'ggml-org/Qwen3-ASR-0.6B-GGUF'
+        REVISION = '928ab958557df9aa2ef1c93e0e83c7ad0933fae2'
+        FILES = {
+            'Qwen3-ASR-0.6B-Q8_0.gguf': (804749248, 'bca259818b50ca7c4c05e9bdb35a5dc04fa039653a6d6f3f0f331f96f6aa1971'),
+            'mmproj-Qwen3-ASR-0.6B-bf16.gguf': (378575520, 'dae36c855f9a82a8916bea2238b24bda69a39d8da8b2f46dee7c103775656039'),
+        }
+        BF16 = ('Qwen3-ASR-0.6B-bf16.gguf', (1509343168, '12b2894d9a7c98cd8f26670f5a47ab738f42bcc98df21e109be493870c71ba50'))
     if args.with_bf16:
         FILES[BF16[0]] = BF16[1]
     DEST.mkdir(parents=True, exist_ok=True)

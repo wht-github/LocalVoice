@@ -631,6 +631,12 @@ fn controller(
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("--asr-models-check") => verification::asr_models_check(
+            args.get(2)
+                .ok_or_else(|| anyhow::anyhow!("input WAV required"))?,
+            args.get(3)
+                .ok_or_else(|| anyhow::anyhow!("report path required"))?,
+        ),
         Some("--qwen-runtime-check") => verification::qwen_runtime_check(
             args.get(2)
                 .ok_or_else(|| anyhow::anyhow!("input WAV required"))?,

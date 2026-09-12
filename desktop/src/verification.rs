@@ -548,6 +548,67 @@ pub fn qwen_runtime_check(audio: &str, output: &str) -> Result<()> {
     Ok(())
 }
 
+/// Exercise the same manager and HTTP path as settings Save without changing
+/// settings or sending recognized text to another application.
+pub fn asr_models_check(audio: &str, output: &str) -> Result<()> {
+    use crate::runtime::{Operation, apply};
+    let client = crate::service::client()?;
+    ensure!(
+        client.get("http://127.0.0.1:8001/health").send().is_err(),
+        "Exit the daily client and release port 8001 before this check"
+    );
+    let result = (|| -> Result<Vec<serde_json::Value>> {
+        let mut reports = Vec::new();
+        for mode in [
+            "sensevoice-cpu",
+            "qwen-llama-0.6b",
+            "qwen-llama-1.7b",
+            "sensevoice-cpu",
+        ] {
+            let config = crate::config::Config {
+                asr_mode: mode.into(),
+                tts_enabled: false,
+                ..crate::config::Config::default()
+            };
+            let startup = apply(Operation::Start(config.clone()), || false)?;
+            crate::service::ready(&config)?;
+            apply(Operation::Start(config.clone()), || false)?;
+            let transcript =
+                crate::service::transcribe_timed(&client, &config, std::fs::read(audio)?)?;
+            ensure!(
+                !transcript.text.is_empty(),
+                "Empty transcription from {mode}"
+            );
+            let health: serde_json::Value = client
+                .get(format!("{}/health", config.asr_url))
+                .send()?
+                .json()?;
+            ensure!(health["mode"] == mode, "Wrong backend after switch");
+            ensure!(
+                health["device"]
+                    == if mode == "sensevoice-cpu" {
+                        "cpu"
+                    } else {
+                        "cuda:0"
+                    },
+                "Wrong device"
+            );
+            reports.push(serde_json::json!({"startup":startup,"health":health,
+                "text":transcript.text,"request_seconds":transcript.request_seconds,
+                "inference_seconds":transcript.inference_seconds}));
+        }
+        apply(Operation::Stop, || false)?;
+        ensure!(
+            client.get("http://127.0.0.1:8001/health").send().is_err(),
+            "ASR survived Stop"
+        );
+        Ok(reports)
+    })();
+    crate::runtime::native_stop();
+    std::fs::write(output, serde_json::to_vec_pretty(&result?)?)?;
+    Ok(())
+}
+
 pub fn runtime_check(output: &str) -> Result<()> {
     use crate::runtime::{Operation, apply};
     let config = crate::config::Config::load()?;

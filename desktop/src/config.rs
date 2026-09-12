@@ -2,6 +2,15 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+// Order shared by settings display and persistence; keep the original backend
+// available for existing settings and controlled PyTorch comparisons.
+pub const ASR_MODES: &[(&str, &str)] = &[
+    ("sensevoice-cpu", "SenseVoice · CPU"),
+    ("qwen-llama-0.6b", "llama · Qwen ASR 0.6B Q8"),
+    ("qwen-llama-1.7b", "llama · Qwen ASR 1.7B Q8"),
+    ("qwen-native", "PyTorch · Qwen ASR 0.6B"),
+];
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -54,7 +63,7 @@ impl Config {
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
-        if !matches!(self.asr_mode.as_str(), "sensevoice-cpu" | "qwen-native") {
+        if !ASR_MODES.iter().any(|(mode, _)| *mode == self.asr_mode) {
             bail!("识别模式无效");
         }
         for address in [&self.asr_url, &self.tts_url] {
@@ -149,5 +158,22 @@ mod tests {
         let restored: Config =
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert!(!restored.tts_enabled && !restored.auto_start_services);
+    }
+
+    #[test]
+    fn all_selectable_models_roundtrip_without_changing_other_settings() {
+        for (mode, _) in ASR_MODES {
+            let config = Config {
+                asr_mode: (*mode).into(),
+                continuous_dictation: true,
+                tts_enabled: false,
+                ..Config::default()
+            };
+            let restored: Config =
+                serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
+            restored.validate().unwrap();
+            assert_eq!(restored.asr_mode, *mode);
+            assert!(restored.continuous_dictation && !restored.tts_enabled);
+        }
     }
 }

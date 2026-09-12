@@ -57,6 +57,7 @@ struct NativeAsr {
     mode: String,
 }
 static NATIVE: OnceLock<Mutex<NativeAsr>> = OnceLock::new();
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 // Whether this process has started the WSL TTS unit, so Stop avoids booting a
 // dormant distro just to run `systemctl stop`.
 static TTS_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -103,10 +104,29 @@ fn native_health(config: &Config) -> Option<serde_json::Value> {
         .json::<serde_json::Value>()
         .ok()
 }
+fn stop_native_child(child: &mut Child) -> Result<()> {
+    if child.try_wait()?.is_none() {
+        // Windows venv python.exe can be a launcher with a second Python child.
+        // Terminating only the launcher leaves the model holding the port/GPU.
+        let result = Command::new("taskkill.exe")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .creation_flags(0x08000000)
+            .output()
+            .context("无法停止识别进程树")?;
+        if !result.status.success() && child.try_wait()?.is_none() {
+            bail!(
+                "无法停止识别进程树：{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+    }
+    child.wait()?;
+    Ok(())
+}
 fn native_start(config: &Config) -> Result<()> {
     let script = server_script()?.canonicalize()?;
     let root = script.parent().context("无法定位识别项目目录")?;
-    let python = if config.asr_mode == "qwen-native" {
+    let python = if config.asr_mode.starts_with("qwen-") {
         root.join(".venv-qwen").join("Scripts").join("python.exe")
     } else {
         venv_python()
@@ -126,14 +146,16 @@ fn native_start(config: &Config) -> Result<()> {
         })
         .lock()
         .unwrap();
+    if SHUTTING_DOWN.load(Ordering::SeqCst) {
+        bail!("应用正在退出");
+    }
     let same_mode = guard.mode == config.asr_mode;
     if let Some(child) = guard.child.as_mut() {
         if child.try_wait()?.is_none() {
             if same_mode {
                 return Ok(());
             }
-            child.kill().context("无法停止旧识别模型")?;
-            child.wait()?;
+            stop_native_child(child).context("无法停止旧识别模型")?;
         }
     }
     guard.child = None;
@@ -191,11 +213,18 @@ pub fn native_stop() {
     if let Some(lock) = NATIVE.get() {
         if let Ok(mut guard) = lock.lock() {
             if let Some(mut child) = guard.child.take() {
-                let _ = child.kill();
-                let _ = child.wait();
+                if let Err(error) = stop_native_child(&mut child) {
+                    eprintln!("{error:#}");
+                    guard.child = Some(child);
+                }
             }
         }
     }
+}
+
+pub fn shutdown() {
+    SHUTTING_DOWN.store(true, Ordering::SeqCst);
+    native_stop();
 }
 
 // ---- optional WSL TTS ----
@@ -330,11 +359,11 @@ pub fn apply(operation: Operation, cancelled: impl Fn() -> bool) -> Result<Strin
                 .unwrap_or(false)
         });
         if ready {
-            let name = if config.asr_mode == "qwen-native" {
-                "Qwen · NVIDIA GPU"
-            } else {
-                "SenseVoice · CPU"
-            };
+            let name = crate::config::ASR_MODES
+                .iter()
+                .find(|(mode, _)| *mode == config.asr_mode)
+                .map(|(_, label)| *label)
+                .unwrap_or("未知模型");
             return Ok(format!(
                 "识别已就绪 · {name}；朗读{}",
                 if config.tts_enabled {

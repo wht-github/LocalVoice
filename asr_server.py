@@ -1,4 +1,4 @@
-"""Local STT: SenseVoice CPU, native Qwen CUDA, or Qwen vLLM."""
+"""Local STT: SenseVoice CPU, Qwen llama.cpp/Transformers CUDA, or Qwen vLLM."""
 import io
 import os
 import re
@@ -13,9 +13,13 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 BACKEND = os.environ.get("ASR_BACKEND", "sensevoice-cpu")
-if BACKEND not in {"sensevoice-cpu", "qwen-vllm", "qwen-native"}:
+LLAMA = BACKEND in {"qwen-llama-0.6b", "qwen-llama-1.7b"}
+if not LLAMA and BACKEND not in {"sensevoice-cpu", "qwen-vllm", "qwen-native"}:
     raise ValueError("Unknown ASR_BACKEND")
 MODEL_ID = "Qwen/Qwen3-ASR-0.6B" if BACKEND == "qwen-vllm" else "FunAudioLLM/SenseVoiceSmall"
+if LLAMA:
+    from llama_asr import SIZES
+    MODEL_ID = f"Qwen3-ASR-{SIZES[BACKEND]}-Q8_0"
 if BACKEND == "qwen-native":
     MODEL_ID = "Qwen/Qwen3-ASR-0.6B-hf"
     root = Path(__file__).resolve().parent
@@ -35,6 +39,18 @@ processor = None
 @asynccontextmanager
 async def lifespan(app):
     global model, processor
+    if LLAMA:
+        from llama_asr import LlamaASR
+        model = LlamaASR(BACKEND)
+        try:
+            import librosa
+            warm_audio = librosa.resample(np.zeros(24000, dtype=np.float32), orig_sr=24000, target_sr=16000)
+            infer(warm_audio, "auto", warmup=True)
+            yield
+        finally:
+            model.close()
+            model = None
+        return
     import torch
     torch.set_num_threads(int(os.environ.get("ASR_THREADS", "4")))
     if DEVICE != "cpu" and not torch.cuda.is_available():
@@ -57,8 +73,16 @@ async def lifespan(app):
         ).to(DEVICE).eval()
     else:
         from funasr import AutoModel
+        from huggingface_hub import snapshot_download
+        from huggingface_hub.errors import LocalEntryNotFoundError
+        path = os.environ.get("ASR_MODEL")
+        if not path:
+            try:
+                path = snapshot_download(MODEL_ID, local_files_only=True)
+            except LocalEntryNotFoundError:
+                path = MODEL_ID  # First install can still download the model.
         model = AutoModel(
-            model=os.environ.get("ASR_MODEL", MODEL_ID),
+            model=path,
             hub="hf", device=DEVICE, ncpu=4, disable_update=True,
             trust_remote_code=False,
         )
@@ -76,12 +100,15 @@ app = FastAPI(title="Local speech recognition", lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    return {"ready": model is not None, "model": MODEL_ID,
-            "backend": {"qwen-vllm": "vllm", "qwen-native": "transformers", "sensevoice-cpu": "funasr"}[BACKEND],
+    ready = model is not None and (not LLAMA or model.child.poll() is None)
+    return {"ready": ready, "model": MODEL_ID,
+            "backend": "llama.cpp" if LLAMA else {"qwen-vllm": "vllm", "qwen-native": "transformers", "sensevoice-cpu": "funasr"}[BACKEND],
             "mode": BACKEND, "device": DEVICE}
 
 
 def infer(samples, language, warmup=False):
+    if LLAMA:
+        return model.transcribe(samples, language, warmup)
     if BACKEND == "qwen-native":
         import torch
         # Avoid hallucinations for actual digital silence, including warm-up audio.

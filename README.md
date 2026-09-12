@@ -4,7 +4,7 @@
 朗读（TTS）默认关闭；启用时使用专用 WSL2 实例 `LocalVoice`（Ubuntu 24.04，虚拟磁盘位于 `D:\WSL\LocalVoice`）中的 MeloTTS。旧 Kokoro 环境保留用于回退，不同时加载。
 Qwen3-ASR vLLM 曾在 WSL 中验证过（数据见 [STT 模式](docs/asr-gpu-and-vllm.md)），目前从桌面端移除，脚本保留供手动实验。
 
-Windows 原生 NVIDIA GPU 使用独立的 PyTorch CUDA / Transformers 环境，见 [Qwen 原生说明](docs/qwen-native-windows.md)。悬浮窗设置中可选择“Qwen · NVIDIA GPU”，保存后重新加载模型；也可通过独立脚本转写本地录音并记录耗时、显存。
+悬浮窗设置现可选择 **SenseVoice CPU、llama.cpp Qwen ASR 0.6B Q8、1.7B Q8**，保存后重新加载模型，见 [桌面模型选择与安装](docs/qwen-llama-desktop.md)。原来的 PyTorch CUDA / Transformers 0.6B 入口保留作对照，见 [Qwen 原生说明](docs/qwen-native-windows.md)。
 
 想动手修改 GPU 算子，可运行 `.\tilelang-lab.ps1`，进入独立的 [PyTorch + TileLang 实验](docs/tilelang-lab.md)：包含可运行加法基线、正确性检查、计时和一行算子融合练习。
 
@@ -146,7 +146,7 @@ Windows 的 `%UserProfile%\.wslconfig` 未改动；没有调整全局 memory、p
 
 资源实测、作用范围及恢复说明见 [资源与隔离记录](docs/resources-and-isolation.md)。
 
-ASR 和 TTS 各使用 4 个计算线程，采用系统默认的同等调度权重；通常不会同时高频使用，不额外压低 TTS。ASR 可在桌面设置切换 SenseVoice CPU 或 Qwen3-ASR 0.6B vLLM 两种模式；Qwen 使用独立 GPU 环境和显存预算，CPU 模式仍保留。两个服务合计的资源上限保持不变。11 分 40 秒真人混读拼接音频已完成分段测试，自动语言模式处理约 30 秒，混合错误率 14.22%；方法和限制见 [长中英混用测试](docs/long-mixed-asr-test.md)。长音频分段目前仅在测试客户端实现，网页上传限制仍为 30 秒。
+以上额度描述历史 WSL 服务，不限制当前 Windows 原生识别进程。桌面当前的 CPU、llama.cpp 和 PyTorch 选择见 [模型设置](docs/qwen-llama-desktop.md)。历史 vLLM 测试曾对 11 分 40 秒真人混读拼接音频进行分段，自动语言模式处理约 30 秒，混合错误率 14.22%；方法和限制见 [长中英混用测试](docs/long-mixed-asr-test.md)，不能把它作为当前桌面后端的性能数据。
 
 ## 验证
 
