@@ -21,10 +21,24 @@ def rmsnorm_kernel(X, W, Y):
         #         Hint: T.reduce_sum(squares, total, dim=0)
         # TODO 3: Multiply x by the reciprocal square root, convert to FP16,
         #         then multiply by W. Hint: T.rsqrt, T.cast.
-        for col in T.Parallel(1024):
-            # Starter only: compiles, but intentionally omits normalization.
-            Y[row, col] = X[row, col] * W[col]
+        squares = T.alloc_fragment((1024,), T.float32)
+        total = T.alloc_fragment((1,), T.float32)
 
+        for col in T.Parallel(1024):
+            value = T.cast(X[row, col], T.float32)
+            squares[col] = value * value
+            # Starter only: compiles, but intentionally omits normalization.
+            # Y[row, col] = X[row, col] * W[col]
+        
+        T.reduce_sum(squares, total, dim=0)
+        mean_square = total[0] / T.float32(1024)
+        scale = T.rsqrt(mean_square + T.float32(1e-6))
+
+        for col in T.Parallel(1024):
+            value = T.cast(X[row, col], T.float32)
+            normalized = value * scale
+            normalized_fp16 = T.cast(normalized, T.float16)
+            Y[row, col] = normalized_fp16 * W[col]
 
 def rmsnorm_candidate(x, weight):
     """Same allocating interface as the Qwen reference; contiguous FP16 only."""
