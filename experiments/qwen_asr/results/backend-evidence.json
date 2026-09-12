@@ -1,0 +1,110 @@
+{
+  "bf16-pilot": {
+    "log_sha256": "7a17d7cd1901d45ae75af1bd5c79a627048cf9cb5a1d52cb34d19fb22aee5717",
+    "lines": [
+      "0.00.736.933 I load_tensors: offloaded 29/29 layers to GPU",
+      "0.00.736.937 I load_tensors:   CPU_Mapped model buffer size =   593.50 MiB",
+      "0.00.736.939 I load_tensors:        CUDA0 model buffer size =  3281.97 MiB",
+      "0.02.166.056 I llama_context: flash_attn            = enabled",
+      "0.02.177.675 I llama_kv_cache:      CUDA0 KV buffer size =   112.00 MiB",
+      "0.02.314.431 I clip_ctx: CLIP using CUDA0 backend",
+      "0.02.858.888 I warmup: flash attention is enabled"
+    ]
+  },
+  "q8-pilot": {
+    "log_sha256": "f581c3ee76ca7007f7fc0b2cded90e0b6d9c82688b5b86cc3b5b5623900c4e74",
+    "lines": [
+      "0.00.610.918 I load_tensors: offloaded 29/29 layers to GPU",
+      "0.00.610.922 I load_tensors:   CPU_Mapped model buffer size =   315.30 MiB",
+      "0.00.610.924 I load_tensors:        CUDA0 model buffer size =  1743.77 MiB",
+      "0.01.344.240 I llama_context: flash_attn            = enabled",
+      "0.01.345.175 I llama_kv_cache:      CUDA0 KV buffer size =   112.00 MiB",
+      "0.01.430.844 I clip_ctx: CLIP using CUDA0 backend",
+      "0.02.048.456 I warmup: flash attention is enabled"
+    ]
+  },
+  "q6-pilot": {
+    "log_sha256": "89f7440b6b21e8b10b295b76ce3cd029d5698068f8c7a1cd57f11a70e99777fa",
+    "lines": [
+      "0.00.540.480 I load_tensors: offloaded 29/29 layers to GPU",
+      "0.00.540.484 I load_tensors:   CPU_Mapped model buffer size =   243.43 MiB",
+      "0.00.540.485 I load_tensors:        CUDA0 model buffer size =  1346.40 MiB",
+      "0.01.075.670 I llama_context: flash_attn            = enabled",
+      "0.01.076.817 I llama_kv_cache:      CUDA0 KV buffer size =   112.00 MiB",
+      "0.01.135.115 I clip_ctx: CLIP using CUDA0 backend",
+      "0.01.674.963 I warmup: flash attention is enabled"
+    ]
+  },
+  "q4-pilot": {
+    "log_sha256": "743d71c9cda6e09994e9235516982fd04befb589d2b2f05faf2d41789b12d18d",
+    "lines": [
+      "0.00.539.560 I load_tensors: offloaded 29/29 layers to GPU",
+      "0.00.539.564 I load_tensors:   CPU_Mapped model buffer size =   166.92 MiB",
+      "0.00.539.565 I load_tensors:        CUDA0 model buffer size =  1050.43 MiB",
+      "0.00.957.227 I llama_context: flash_attn            = enabled",
+      "0.00.958.215 I llama_kv_cache:      CUDA0 KV buffer size =   112.00 MiB",
+      "0.01.019.935 I clip_ctx: CLIP using CUDA0 backend",
+      "0.01.566.260 I warmup: flash attention is enabled"
+    ]
+  },
+  "q8-no-graphs-pilot": {
+    "log_sha256": "29517ee2af003e809b97cf427024733deb66b7c7816bd952221b9efdecf83dc5",
+    "lines": [
+      "0.00.594.456 I load_tensors: offloaded 29/29 layers to GPU",
+      "0.00.594.460 I load_tensors:   CPU_Mapped model buffer size =   315.30 MiB",
+      "0.00.594.461 I load_tensors:        CUDA0 model buffer size =  1743.77 MiB",
+      "0.01.362.336 I llama_context: flash_attn            = enabled",
+      "0.01.363.037 I llama_kv_cache:      CUDA0 KV buffer size =   112.00 MiB",
+      "0.01.423.399 I clip_ctx: CLIP using CUDA0 backend",
+      "0.02.000.637 I warmup: flash attention is enabled"
+    ]
+  },
+  "q8-no-fa-pilot": {
+    "log_sha256": "9823564aaa7a55e3f14b3da8cacc3fe58cd2e942797358cba75b0cad60b06e77",
+    "lines": [
+      "0.00.587.284 I load_tensors: offloaded 29/29 layers to GPU",
+      "0.00.587.290 I load_tensors:   CPU_Mapped model buffer size =   315.30 MiB",
+      "0.00.587.291 I load_tensors:        CUDA0 model buffer size =  1743.77 MiB",
+      "0.01.362.568 I llama_context: flash_attn            = disabled",
+      "0.01.363.987 I llama_kv_cache:      CUDA0 KV buffer size =   112.00 MiB",
+      "0.01.435.684 I clip_ctx: CLIP using CUDA0 backend",
+      "0.02.031.935 I warmup: flash attention is disabled"
+    ]
+  },
+  "bf16-holdout": {
+    "log_sha256": "cd111e5aed1ebfa381764a91884d453022a22dc402fc2998bcc70a98bfface22",
+    "lines": [
+      "0.00.756.365 I load_tensors: offloaded 29/29 layers to GPU",
+      "0.00.756.371 I load_tensors:   CPU_Mapped model buffer size =   593.50 MiB",
+      "0.00.756.372 I load_tensors:        CUDA0 model buffer size =  3281.97 MiB",
+      "0.02.196.533 I llama_context: flash_attn            = enabled",
+      "0.02.197.379 I llama_kv_cache:      CUDA0 KV buffer size =   112.00 MiB",
+      "0.02.283.098 I clip_ctx: CLIP using CUDA0 backend",
+      "0.02.901.525 I warmup: flash attention is enabled"
+    ]
+  },
+  "q8-holdout": {
+    "log_sha256": "c903f85de1789e571efafbb3fa50bff6d08f2ff8358722024d3fabd2a166f363",
+    "lines": [
+      "0.00.635.555 I load_tensors: offloaded 29/29 layers to GPU",
+      "0.00.635.560 I load_tensors:   CPU_Mapped model buffer size =   315.30 MiB",
+      "0.00.635.561 I load_tensors:        CUDA0 model buffer size =  1743.77 MiB",
+      "0.01.400.937 I llama_context: flash_attn            = enabled",
+      "0.01.401.771 I llama_kv_cache:      CUDA0 KV buffer size =   112.00 MiB",
+      "0.01.476.118 I clip_ctx: CLIP using CUDA0 backend",
+      "0.02.048.928 I warmup: flash attention is enabled"
+    ]
+  },
+  "q4-holdout": {
+    "log_sha256": "74af064c1795f57353990b8a1241565d07f0e32ffd9f86feebbbf65a22027fb8",
+    "lines": [
+      "0.00.505.091 I load_tensors: offloaded 29/29 layers to GPU",
+      "0.00.505.095 I load_tensors:   CPU_Mapped model buffer size =   166.92 MiB",
+      "0.00.505.097 I load_tensors:        CUDA0 model buffer size =  1050.43 MiB",
+      "0.00.946.139 I llama_context: flash_attn            = enabled",
+      "0.00.947.043 I llama_kv_cache:      CUDA0 KV buffer size =   112.00 MiB",
+      "0.01.010.437 I clip_ctx: CLIP using CUDA0 backend",
+      "0.01.575.143 I warmup: flash attention is enabled"
+    ]
+  }
+}

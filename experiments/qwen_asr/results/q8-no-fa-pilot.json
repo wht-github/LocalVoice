@@ -1,0 +1,1613 @@
+{
+  "tag": "q8-no-fa",
+  "split": "pilot",
+  "command": [
+    "D:\\Workspace\\local_voice_app\\.runtime\\llama-build\\bin\\llama-server.exe",
+    "-m",
+    "D:\\Workspace\\local_voice_app\\.runtime\\models\\Qwen3-ASR-1.7B-GGUF\\Qwen3-ASR-1.7B-local-Q8_0.gguf",
+    "--mmproj",
+    "D:\\Workspace\\local_voice_app\\.runtime\\models\\Qwen3-ASR-1.7B-GGUF\\mmproj-Qwen3-ASR-1.7B-bf16.gguf",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "12188",
+    "-ngl",
+    "99",
+    "-c",
+    "1024",
+    "-b",
+    "256",
+    "-ub",
+    "256",
+    "-np",
+    "1",
+    "-t",
+    "4",
+    "-tb",
+    "4",
+    "-fa",
+    "off",
+    "-ctk",
+    "f16",
+    "-ctv",
+    "f16",
+    "--fit",
+    "off",
+    "--cache-ram",
+    "0",
+    "--no-cache-idle-slots",
+    "--no-context-shift",
+    "-lv",
+    "4"
+  ],
+  "cuda_graphs_disabled": false,
+  "model_sha256": "58e22d0532d4eacaf034cfac17a6fed159f37c41390c710186783be439d1fc57",
+  "model_bytes": 2165034944,
+  "mmproj_sha256": "8882e9ddab3186f9aa71b1417c847177913e1466655ac944cf86e9b846735d62",
+  "manifest_sha256": "550aef7dd4bab3a4316d5ab77b7f49d9f9e6eb1ce3f5d0336c21ae2e82029868",
+  "source_commit": "eafe15a5e3d87dd68ae33acf6a7cbd9415a0ac5e",
+  "quality": [
+    {
+      "id": "00038",
+      "language": "zh",
+      "reference": "黑化肥挥发会发黑",
+      "text": "黑化肥挥发会发黑。",
+      "raw": "language Chinese<asr_text>黑化肥挥发会发黑。",
+      "seconds": 0.5199693000176921,
+      "audio_seconds": 2.8199375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 302.773,
+        "prompt_per_token_ms": 6.179040816326531,
+        "prompt_per_second": 161.837416150053,
+        "predicted_n": 11,
+        "predicted_ms": 161.898,
+        "predicted_per_token_ms": 16.189799999999998,
+        "predicted_per_second": 61.767285574868126
+      },
+      "completion_tokens": 11,
+      "peak_device_mib": 4690.04296875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 8
+      }
+    },
+    {
+      "id": "01115",
+      "language": "zh",
+      "reference": "他那个平台的统一性就是有同一个账号可以在不同的",
+      "text": "它那个平台的统一性，就是你同一个账号可以在不同的。",
+      "raw": "language Chinese<asr_text>它那个平台的统一性，就是你同一个账号可以在不同的。",
+      "seconds": 0.33029989997157827,
+      "audio_seconds": 4.1599375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 75,
+        "prompt_ms": 87.69,
+        "prompt_per_token_ms": 1.1692,
+        "prompt_per_second": 855.2856654122477,
+        "predicted_n": 18,
+        "predicted_ms": 229.691,
+        "predicted_per_token_ms": 13.511235294117647,
+        "predicted_per_second": 74.01247763299389
+      },
+      "completion_tokens": 18,
+      "peak_device_mib": 4702.79296875,
+      "mer": {
+        "errors": 2,
+        "reference_units": 23
+      }
+    },
+    {
+      "id": "01219",
+      "language": "zh",
+      "reference": "就我们会谈到就是",
+      "text": "就我们会谈到，就是。",
+      "raw": "language Chinese<asr_text>就我们会谈到，就是。",
+      "seconds": 0.2014748000074178,
+      "audio_seconds": 2.0,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 60.457,
+        "prompt_per_token_ms": 1.2338163265306124,
+        "prompt_per_second": 810.4934085382998,
+        "predicted_n": 10,
+        "predicted_ms": 123.729,
+        "predicted_per_token_ms": 13.747666666666667,
+        "predicted_per_second": 72.73961641975609
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4699.79296875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 8
+      }
+    },
+    {
+      "id": "00916",
+      "language": "zh",
+      "reference": "然后考虑要去哪个国家的问题",
+      "text": "还要考虑要去哪个国家的问题。",
+      "raw": "language Chinese<asr_text>还要考虑要去哪个国家的问题。",
+      "seconds": 0.21782889997120947,
+      "audio_seconds": 2.8,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 57.645,
+        "prompt_per_token_ms": 1.1764285714285716,
+        "prompt_per_second": 850.0303582270794,
+        "predicted_n": 11,
+        "predicted_ms": 135.474,
+        "predicted_per_token_ms": 13.5474,
+        "predicted_per_second": 73.81490175236577
+      },
+      "completion_tokens": 11,
+      "peak_device_mib": 4698.73046875,
+      "mer": {
+        "errors": 2,
+        "reference_units": 13
+      }
+    },
+    {
+      "id": "00819",
+      "language": "zh",
+      "reference": "呃平台接受更多的平台然后两家都有的东西跟我",
+      "text": "呃，平台接触更多的平台，然后了解到更多的东西，跟我。",
+      "raw": "language Chinese<asr_text>呃，平台接触更多的平台，然后了解到更多的东西，跟我。",
+      "seconds": 0.3372180999722332,
+      "audio_seconds": 4.3999375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 75,
+        "prompt_ms": 70.804,
+        "prompt_per_token_ms": 0.9440533333333334,
+        "prompt_per_second": 1059.2621885769165,
+        "predicted_n": 18,
+        "predicted_ms": 232.3,
+        "predicted_per_token_ms": 13.664705882352942,
+        "predicted_per_second": 73.18123116659491
+      },
+      "completion_tokens": 18,
+      "peak_device_mib": 4706.91796875,
+      "mer": {
+        "errors": 6,
+        "reference_units": 21
+      }
+    },
+    {
+      "id": "00692",
+      "language": "zh",
+      "reference": "然后水性会比较好一点",
+      "text": "然后水性会比较好一点。",
+      "raw": "language Chinese<asr_text>然后水性会比较好一点。",
+      "seconds": 0.21349400002509356,
+      "audio_seconds": 3.02,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 62,
+        "prompt_ms": 66.745,
+        "prompt_per_token_ms": 1.0765322580645162,
+        "prompt_per_second": 928.9085324743426,
+        "predicted_n": 11,
+        "predicted_ms": 137.022,
+        "predicted_per_token_ms": 13.7022,
+        "predicted_per_second": 72.98098115631066
+      },
+      "completion_tokens": 11,
+      "peak_device_mib": 4705.60546875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 10
+      }
+    },
+    {
+      "id": "00867",
+      "language": "zh",
+      "reference": "其实我没看过但是我听说深圳特产",
+      "text": "其实我没看过，但是我听说深圳特产。",
+      "raw": "language Chinese<asr_text>其实我没看过，但是我听说深圳特产。",
+      "seconds": 0.25972380000166595,
+      "audio_seconds": 3.77,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 62,
+        "prompt_ms": 59.927,
+        "prompt_per_token_ms": 0.9665645161290323,
+        "prompt_per_second": 1034.592087039231,
+        "predicted_n": 13,
+        "predicted_ms": 159.75,
+        "predicted_per_token_ms": 13.3125,
+        "predicted_per_second": 75.11737089201878
+      },
+      "completion_tokens": 13,
+      "peak_device_mib": 4704.73046875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 15
+      }
+    },
+    {
+      "id": "00975",
+      "language": "zh",
+      "reference": "在未来有可能但是现在的话",
+      "text": "在未来有可能，但是现在的话。",
+      "raw": "language Chinese<asr_text>在未来有可能，但是现在的话。",
+      "seconds": 0.20261969999410212,
+      "audio_seconds": 3.86,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 62,
+        "prompt_ms": 57.337,
+        "prompt_per_token_ms": 0.9247903225806452,
+        "prompt_per_second": 1081.3261942550184,
+        "predicted_n": 11,
+        "predicted_ms": 134.339,
+        "predicted_per_token_ms": 13.4339,
+        "predicted_per_second": 74.43854725731173
+      },
+      "completion_tokens": 11,
+      "peak_device_mib": 4696.54296875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 12
+      }
+    },
+    {
+      "id": "00201",
+      "language": "zh",
+      "reference": "是可能是福建人里面最能吃辣的",
+      "text": "是，可能是福建人里面最能吃辣的。",
+      "raw": "language Chinese<asr_text>是，可能是福建人里面最能吃辣的。",
+      "seconds": 0.27196549996733665,
+      "audio_seconds": 2.84,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 60.59,
+        "prompt_per_token_ms": 1.236530612244898,
+        "prompt_per_second": 808.7143092919623,
+        "predicted_n": 16,
+        "predicted_ms": 202.565,
+        "predicted_per_token_ms": 13.504333333333333,
+        "predicted_per_second": 74.0503048404216
+      },
+      "completion_tokens": 16,
+      "peak_device_mib": 4695.85546875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 14
+      }
+    },
+    {
+      "id": "01190",
+      "language": "zh",
+      "reference": "知道知道之前有接触到但是都是很",
+      "text": "知道，知道，之前有接触到，但是都是很。",
+      "raw": "language Chinese<asr_text>知道，知道，之前有接触到，但是都是很。",
+      "seconds": 0.28031790000386536,
+      "audio_seconds": 2.63,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 57.564,
+        "prompt_per_token_ms": 1.1747755102040816,
+        "prompt_per_second": 851.2264609825586,
+        "predicted_n": 16,
+        "predicted_ms": 196.694,
+        "predicted_per_token_ms": 13.112933333333332,
+        "predicted_per_second": 76.26058751156619
+      },
+      "completion_tokens": 16,
+      "peak_device_mib": 4696.60546875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 15
+      }
+    },
+    {
+      "id": "01222",
+      "language": "en",
+      "reference": "this kind of robots to take care of our parents when they are getting old",
+      "text": "This kind of robot to take care of our parents when they are getting old.",
+      "raw": "language English<asr_text>This kind of robot to take care of our parents when they are getting old.",
+      "seconds": 0.3446291000000201,
+      "audio_seconds": 5.0,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 88,
+        "prompt_ms": 70.527,
+        "prompt_per_token_ms": 0.8014431818181819,
+        "prompt_per_second": 1247.7490890013753,
+        "predicted_n": 20,
+        "predicted_ms": 250.812,
+        "predicted_per_token_ms": 13.20063157894737,
+        "predicted_per_second": 75.75395116661085
+      },
+      "completion_tokens": 20,
+      "peak_device_mib": 4688.66796875,
+      "mer": {
+        "errors": 1,
+        "reference_units": 15
+      }
+    },
+    {
+      "id": "00047",
+      "language": "en",
+      "reference": "so I I mean I study I S N in both my bachelorand master um degree so",
+      "text": "So I I mean I study I S M in both my bachelor and master, uh degree. So.",
+      "raw": "language English<asr_text>So I I mean I study I S M in both my bachelor and master, uh degree. So.",
+      "seconds": 0.44817399996099994,
+      "audio_seconds": 7.04,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 114,
+        "prompt_ms": 81.311,
+        "prompt_per_token_ms": 0.7132543859649123,
+        "prompt_per_second": 1402.0243263519078,
+        "predicted_n": 25,
+        "predicted_ms": 342.754,
+        "predicted_per_token_ms": 14.281416666666667,
+        "predicted_per_second": 70.0210646702883
+      },
+      "completion_tokens": 25,
+      "peak_device_mib": 4691.25390625,
+      "mer": {
+        "errors": 4,
+        "reference_units": 17
+      }
+    },
+    {
+      "id": "00549",
+      "language": "en",
+      "reference": "really it already has",
+      "text": "Really, it already has.",
+      "raw": "language English<asr_text>Really, it already has.",
+      "seconds": 0.19940340000903234,
+      "audio_seconds": 2.34,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 62.148,
+        "prompt_per_token_ms": 1.2683265306122449,
+        "prompt_per_second": 788.4404968784191,
+        "predicted_n": 10,
+        "predicted_ms": 127.629,
+        "predicted_per_token_ms": 14.181000000000001,
+        "predicted_per_second": 70.51688879486636
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4703.44140625,
+      "mer": {
+        "errors": 0,
+        "reference_units": 4
+      }
+    },
+    {
+      "id": "00177",
+      "language": "en",
+      "reference": "so do you love your major",
+      "text": "So, do love your major.",
+      "raw": "language English<asr_text>So, do love your major.",
+      "seconds": 0.22028710000449792,
+      "audio_seconds": 2.4,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 62.535,
+        "prompt_per_token_ms": 1.2762244897959183,
+        "prompt_per_second": 783.5612057247941,
+        "predicted_n": 11,
+        "predicted_ms": 145.657,
+        "predicted_per_token_ms": 14.565700000000001,
+        "predicted_per_second": 68.65444159909924
+      },
+      "completion_tokens": 11,
+      "peak_device_mib": 4698.69140625,
+      "mer": {
+        "errors": 1,
+        "reference_units": 6
+      }
+    },
+    {
+      "id": "00108",
+      "language": "en",
+      "reference": "uh uh i i mean what's your planning for your next",
+      "text": "Uh uh, I I mean, what's your planning for your next?",
+      "raw": "language English<asr_text>Uh uh, I I mean, what's your planning for your next?",
+      "seconds": 0.3280292000272311,
+      "audio_seconds": 3.66,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 62,
+        "prompt_ms": 64.867,
+        "prompt_per_token_ms": 1.046241935483871,
+        "prompt_per_second": 955.801871521729,
+        "predicted_n": 19,
+        "predicted_ms": 250.732,
+        "predicted_per_token_ms": 13.929555555555556,
+        "predicted_per_second": 71.78979946716015
+      },
+      "completion_tokens": 19,
+      "peak_device_mib": 4680.50390625,
+      "mer": {
+        "errors": 0,
+        "reference_units": 11
+      }
+    },
+    {
+      "id": "00137",
+      "language": "en",
+      "reference": "um i'm i'm marry soon right now",
+      "text": "Um, I I'm in Arizona right now.",
+      "raw": "language English<asr_text>Um, I I'm in Arizona right now.",
+      "seconds": 0.2674871999770403,
+      "audio_seconds": 2.92,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 66.55,
+        "prompt_per_token_ms": 1.3581632653061224,
+        "prompt_per_second": 736.2885048835462,
+        "predicted_n": 14,
+        "predicted_ms": 191.16,
+        "predicted_per_token_ms": 14.704615384615384,
+        "predicted_per_second": 68.00585896631094
+      },
+      "completion_tokens": 14,
+      "peak_device_mib": 4748.84765625,
+      "mer": {
+        "errors": 3,
+        "reference_units": 7
+      }
+    },
+    {
+      "id": "00508",
+      "language": "en",
+      "reference": "this is a tricky question",
+      "text": "This is a tricky question.",
+      "raw": "language English<asr_text>This is a tricky question.",
+      "seconds": 0.23233880003681406,
+      "audio_seconds": 3.04,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 62,
+        "prompt_ms": 71.137,
+        "prompt_per_token_ms": 1.1473709677419355,
+        "prompt_per_second": 871.5576985253806,
+        "predicted_n": 10,
+        "predicted_ms": 132.404,
+        "predicted_per_token_ms": 14.711555555555556,
+        "predicted_per_second": 67.9737772272741
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4747.84765625,
+      "mer": {
+        "errors": 0,
+        "reference_units": 5
+      }
+    },
+    {
+      "id": "00530",
+      "language": "en",
+      "reference": "it's like the electronic games",
+      "text": "Like electronic games.",
+      "raw": "language English<asr_text>Like electronic games.",
+      "seconds": 0.1935550000052899,
+      "audio_seconds": 2.2099375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 63.978,
+        "prompt_per_token_ms": 1.3056734693877552,
+        "prompt_per_second": 765.8882740942199,
+        "predicted_n": 8,
+        "predicted_ms": 105.033,
+        "predicted_per_token_ms": 15.004714285714286,
+        "predicted_per_second": 66.64572086867936
+      },
+      "completion_tokens": 8,
+      "peak_device_mib": 4739.28515625,
+      "mer": {
+        "errors": 2,
+        "reference_units": 5
+      }
+    },
+    {
+      "id": "00703",
+      "language": "en",
+      "reference": "basketball god the god of basketball",
+      "text": "Basketball God, the God of basketball.",
+      "raw": "language English<asr_text>Basketball God, the God of basketball.",
+      "seconds": 0.24328500003321096,
+      "audio_seconds": 2.8301875,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 62.431,
+        "prompt_per_token_ms": 1.2741020408163264,
+        "prompt_per_second": 784.8664926078392,
+        "predicted_n": 13,
+        "predicted_ms": 171.085,
+        "predicted_per_token_ms": 14.257083333333334,
+        "predicted_per_second": 70.14057339918753
+      },
+      "completion_tokens": 13,
+      "peak_device_mib": 4739.03515625,
+      "mer": {
+        "errors": 0,
+        "reference_units": 6
+      }
+    },
+    {
+      "id": "00025",
+      "language": "en",
+      "reference": "really uh close to Guangzhou Guangdong province",
+      "text": "Really, uh, close to Guang Guangdong Province.",
+      "raw": "language English<asr_text>Really, uh, close to Guang Guangdong Province.",
+      "seconds": 0.29550149996066466,
+      "audio_seconds": 3.64,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 62,
+        "prompt_ms": 66.89,
+        "prompt_per_token_ms": 1.0788709677419355,
+        "prompt_per_second": 926.8949020780385,
+        "predicted_n": 15,
+        "predicted_ms": 205.203,
+        "predicted_per_token_ms": 14.657357142857142,
+        "predicted_per_second": 68.22512341437503
+      },
+      "completion_tokens": 15,
+      "peak_device_mib": 4781.91796875,
+      "mer": {
+        "errors": 1,
+        "reference_units": 7
+      }
+    },
+    {
+      "id": "00233",
+      "language": "mixed",
+      "reference": "对台湾的台湾大学National Taiwan University念",
+      "text": "对，台湾的台湾大学National Taiwan University念。",
+      "raw": "language Chinese<asr_text>对，台湾的台湾大学National Taiwan University念。",
+      "seconds": 0.266230600012932,
+      "audio_seconds": 3.44,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 62,
+        "prompt_ms": 66.247,
+        "prompt_per_token_ms": 1.0685,
+        "prompt_per_second": 935.8914365933553,
+        "predicted_n": 15,
+        "predicted_ms": 190.017,
+        "predicted_per_token_ms": 13.572642857142856,
+        "predicted_per_second": 73.677618318361
+      },
+      "completion_tokens": 15,
+      "peak_device_mib": 4781.91796875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 12
+      }
+    },
+    {
+      "id": "00441",
+      "language": "mixed",
+      "reference": "那不如我们就跳到下一个topic topic吧",
+      "text": "那不如我们就跳到下一个topic topic吧。",
+      "raw": "language Chinese<asr_text>那不如我们就跳到下一个topic topic吧。",
+      "seconds": 0.2567764999694191,
+      "audio_seconds": 3.04,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 62,
+        "prompt_ms": 58.943,
+        "prompt_per_token_ms": 0.9506935483870967,
+        "prompt_per_second": 1051.863664896595,
+        "predicted_n": 14,
+        "predicted_ms": 176.94,
+        "predicted_per_token_ms": 13.61076923076923,
+        "predicted_per_second": 73.47123318639088
+      },
+      "completion_tokens": 14,
+      "peak_device_mib": 4780.60546875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 14
+      }
+    },
+    {
+      "id": "00416",
+      "language": "mixed",
+      "reference": "也就是我现在supervisor呢就跟我说哎那你过来跟我做我就给你一些robotics相关的题目啊这样子做那我就说哎那其实",
+      "text": "也就是我现在是个advisor呢，就跟我说，哎，那你过来跟我做，我就给你一些robotics相关的题目啊，这样子做，这样，那我就想说，哎，那其实。",
+      "raw": "language Chinese<asr_text>也就是我现在是个advisor呢，就跟我说，哎，那你过来跟我做，我就给你一些robotics相关的题目啊，这样子做，这样，那我就想说，哎，那其实。",
+      "seconds": 0.7335919000324793,
+      "audio_seconds": 8.62,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 127,
+        "prompt_ms": 109.983,
+        "prompt_per_token_ms": 0.8660078740157481,
+        "prompt_per_second": 1154.7239118772902,
+        "predicted_n": 46,
+        "predicted_ms": 604.253,
+        "predicted_per_token_ms": 13.427844444444446,
+        "predicted_per_second": 74.47211681199762
+      },
+      "completion_tokens": 46,
+      "peak_device_mib": 4780.54296875,
+      "mer": {
+        "errors": 6,
+        "reference_units": 45
+      }
+    },
+    {
+      "id": "00967",
+      "language": "mixed",
+      "reference": "呃work shop学校应该也有统一的的work shop",
+      "text": "呃，workshop学校应该也有统一的workshop。",
+      "raw": "language Chinese<asr_text>呃，workshop学校应该也有统一的workshop。",
+      "seconds": 0.28133269998943433,
+      "audio_seconds": 2.89,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 65.792,
+        "prompt_per_token_ms": 1.3426938775510204,
+        "prompt_per_second": 744.7714007782101,
+        "predicted_n": 16,
+        "predicted_ms": 206.443,
+        "predicted_per_token_ms": 13.762866666666667,
+        "predicted_per_second": 72.65928125438982
+      },
+      "completion_tokens": 16,
+      "peak_device_mib": 4772.88671875,
+      "mer": {
+        "errors": 5,
+        "reference_units": 15
+      }
+    },
+    {
+      "id": "00711",
+      "language": "mixed",
+      "reference": "to to get a score to去把人挤走开然后然后去一些灌篮得分之类的",
+      "text": "to to get a score to去把人挤走开，然后然后去一些灌篮得分之类的。",
+      "raw": "language Chinese<asr_text>to to get a score to去把人挤走开，然后然后去一些灌篮得分之类的。",
+      "seconds": 0.4750752000254579,
+      "audio_seconds": 8.42,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 127,
+        "prompt_ms": 100.113,
+        "prompt_per_token_ms": 0.7882913385826772,
+        "prompt_per_second": 1268.5665198325892,
+        "predicted_n": 26,
+        "predicted_ms": 349.281,
+        "predicted_per_token_ms": 13.97124,
+        "predicted_per_second": 71.57560817794268
+      },
+      "completion_tokens": 26,
+      "peak_device_mib": 4761.19921875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 26
+      }
+    },
+    {
+      "id": "00715",
+      "language": "mixed",
+      "reference": "说到得分后卫我最喜欢的得分后卫是McGrady Tracy McGrady",
+      "text": "说到得分后卫，我最喜欢的得分后卫是McGrady，Tracy McGrady。",
+      "raw": "language Chinese<asr_text>说到得分后卫，我最喜欢的得分后卫是McGrady，Tracy McGrady。",
+      "seconds": 0.39430339995305985,
+      "audio_seconds": 6.82,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 101,
+        "prompt_ms": 75.827,
+        "prompt_per_token_ms": 0.7507623762376238,
+        "prompt_per_second": 1331.9793741015733,
+        "predicted_n": 22,
+        "predicted_ms": 291.145,
+        "predicted_per_token_ms": 13.864047619047618,
+        "predicted_per_second": 72.12900788267015
+      },
+      "completion_tokens": 22,
+      "peak_device_mib": 4770.94921875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 19
+      }
+    },
+    {
+      "id": "01055",
+      "language": "mixed",
+      "reference": "好那我们现在开始我们第二个topic就是你认为你就是你认为children应不应该有自己的smart phone",
+      "text": "好，那我们现在开始我们第二个topic，就是你认为，你就是你认为，丘疹应不应该有自己的smartphone？",
+      "raw": "language Chinese<asr_text>好，那我们现在开始我们第二个topic，就是你认为，你就是你认为，丘疹应不应该有自己的smartphone？",
+      "seconds": 0.5374998999759555,
+      "audio_seconds": 11.34,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 166,
+        "prompt_ms": 108.612,
+        "prompt_per_token_ms": 0.654289156626506,
+        "prompt_per_second": 1528.3762383530366,
+        "predicted_n": 30,
+        "predicted_ms": 387.881,
+        "predicted_per_token_ms": 13.375206896551724,
+        "predicted_per_second": 74.76519860472672
+      },
+      "completion_tokens": 30,
+      "peak_device_mib": 4714.69921875,
+      "mer": {
+        "errors": 4,
+        "reference_units": 36
+      }
+    },
+    {
+      "id": "00989",
+      "language": "mixed",
+      "reference": "他他make a mistake",
+      "text": "他他 make a mistake.",
+      "raw": "language English<asr_text>他他 make a mistake.",
+      "seconds": 0.19174789998214692,
+      "audio_seconds": 2.2301875,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 60.389,
+        "prompt_per_token_ms": 1.2324285714285714,
+        "prompt_per_second": 811.4060507708358,
+        "predicted_n": 10,
+        "predicted_ms": 121.539,
+        "predicted_per_token_ms": 13.504333333333333,
+        "predicted_per_second": 74.05030484042159
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4714.63671875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 5
+      }
+    },
+    {
+      "id": "00434",
+      "language": "mixed",
+      "reference": "然后但是我当时读了很多相关的paper",
+      "text": "然后，但是我当时读了很多相关的paper。",
+      "raw": "language Chinese<asr_text>然后，但是我当时读了很多相关的paper。",
+      "seconds": 0.2424369000364095,
+      "audio_seconds": 4.82,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 75,
+        "prompt_ms": 66.935,
+        "prompt_per_token_ms": 0.8924666666666667,
+        "prompt_per_second": 1120.4900276387539,
+        "predicted_n": 13,
+        "predicted_ms": 161.832,
+        "predicted_per_token_ms": 13.485999999999999,
+        "predicted_per_second": 74.15097137772504
+      },
+      "completion_tokens": 13,
+      "peak_device_mib": 4713.32421875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 15
+      }
+    },
+    {
+      "id": "01200",
+      "language": "mixed",
+      "reference": "block chain是一个非常复杂的技术因为我当时在网上搜了很久",
+      "text": "blockchain是一个非常复杂的技术，因为我当时在网上搜了很久。",
+      "raw": "language Chinese<asr_text>blockchain是一个非常复杂的技术，因为我当时在网上搜了很久。",
+      "seconds": 0.3040869999676943,
+      "audio_seconds": 3.92,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 62,
+        "prompt_ms": 64.491,
+        "prompt_per_token_ms": 1.0401774193548388,
+        "prompt_per_second": 961.374455350359,
+        "predicted_n": 17,
+        "predicted_ms": 228.675,
+        "predicted_per_token_ms": 14.2921875,
+        "predicted_per_second": 69.96829561604898
+      },
+      "completion_tokens": 17,
+      "peak_device_mib": 4688.57421875,
+      "mer": {
+        "errors": 2,
+        "reference_units": 24
+      }
+    }
+  ],
+  "performance": [
+    {
+      "id": "01219",
+      "language": "zh",
+      "reference": "就我们会谈到就是",
+      "text": "就我们会谈到，就是。",
+      "raw": "language Chinese<asr_text>就我们会谈到，就是。",
+      "seconds": 0.2105714000063017,
+      "audio_seconds": 2.0,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 58.93,
+        "prompt_per_token_ms": 1.20265306122449,
+        "prompt_per_second": 831.4949940607501,
+        "predicted_n": 10,
+        "predicted_ms": 121.749,
+        "predicted_per_token_ms": 13.527666666666667,
+        "predicted_per_second": 73.92257841953527
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4688.57421875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 8
+      },
+      "iteration": 1
+    },
+    {
+      "id": "01219",
+      "language": "zh",
+      "reference": "就我们会谈到就是",
+      "text": "就我们会谈到，就是。",
+      "raw": "language Chinese<asr_text>就我们会谈到，就是。",
+      "seconds": 0.20980010001221672,
+      "audio_seconds": 2.0,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 56.545,
+        "prompt_per_token_ms": 1.1539795918367348,
+        "prompt_per_second": 866.5664514988063,
+        "predicted_n": 10,
+        "predicted_ms": 122.822,
+        "predicted_per_token_ms": 13.646888888888888,
+        "predicted_per_second": 73.27677451922293
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4688.57421875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 8
+      },
+      "iteration": 2
+    },
+    {
+      "id": "01219",
+      "language": "zh",
+      "reference": "就我们会谈到就是",
+      "text": "就我们会谈到，就是。",
+      "raw": "language Chinese<asr_text>就我们会谈到，就是。",
+      "seconds": 0.2116140999714844,
+      "audio_seconds": 2.0,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 59.556,
+        "prompt_per_token_ms": 1.2154285714285713,
+        "prompt_per_second": 822.7550540667606,
+        "predicted_n": 10,
+        "predicted_ms": 129.488,
+        "predicted_per_token_ms": 14.387555555555556,
+        "predicted_per_second": 69.50451007043124
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4667.48046875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 8
+      },
+      "iteration": 3
+    },
+    {
+      "id": "00819",
+      "language": "zh",
+      "reference": "呃平台接受更多的平台然后两家都有的东西跟我",
+      "text": "呃，平台接触更多的平台，然后了解到更多的东西，跟我。",
+      "raw": "language Chinese<asr_text>呃，平台接触更多的平台，然后了解到更多的东西，跟我。",
+      "seconds": 0.31519069999922067,
+      "audio_seconds": 4.3999375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 75,
+        "prompt_ms": 65.491,
+        "prompt_per_token_ms": 0.8732133333333333,
+        "prompt_per_second": 1145.1955230489687,
+        "predicted_n": 18,
+        "predicted_ms": 224.76,
+        "predicted_per_token_ms": 13.221176470588235,
+        "predicted_per_second": 75.63623420537462
+      },
+      "completion_tokens": 18,
+      "peak_device_mib": 4667.48046875,
+      "mer": {
+        "errors": 6,
+        "reference_units": 21
+      },
+      "iteration": 1
+    },
+    {
+      "id": "00819",
+      "language": "zh",
+      "reference": "呃平台接受更多的平台然后两家都有的东西跟我",
+      "text": "呃，平台接触更多的平台，然后了解到更多的东西，跟我。",
+      "raw": "language Chinese<asr_text>呃，平台接触更多的平台，然后了解到更多的东西，跟我。",
+      "seconds": 0.34043010004097596,
+      "audio_seconds": 4.3999375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 75,
+        "prompt_ms": 62.699,
+        "prompt_per_token_ms": 0.8359866666666667,
+        "prompt_per_second": 1196.1913268154196,
+        "predicted_n": 18,
+        "predicted_ms": 225.943,
+        "predicted_per_token_ms": 13.290764705882353,
+        "predicted_per_second": 75.2402154525699
+      },
+      "completion_tokens": 18,
+      "peak_device_mib": 4649.85546875,
+      "mer": {
+        "errors": 6,
+        "reference_units": 21
+      },
+      "iteration": 2
+    },
+    {
+      "id": "00819",
+      "language": "zh",
+      "reference": "呃平台接受更多的平台然后两家都有的东西跟我",
+      "text": "呃，平台接触更多的平台，然后了解到更多的东西，跟我。",
+      "raw": "language Chinese<asr_text>呃，平台接触更多的平台，然后了解到更多的东西，跟我。",
+      "seconds": 0.31231849995674565,
+      "audio_seconds": 4.3999375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 75,
+        "prompt_ms": 62.175,
+        "prompt_per_token_ms": 0.829,
+        "prompt_per_second": 1206.2726176115802,
+        "predicted_n": 18,
+        "predicted_ms": 225.963,
+        "predicted_per_token_ms": 13.291941176470587,
+        "predicted_per_second": 75.23355593614883
+      },
+      "completion_tokens": 18,
+      "peak_device_mib": 4649.54296875,
+      "mer": {
+        "errors": 6,
+        "reference_units": 21
+      },
+      "iteration": 3
+    },
+    {
+      "id": "00530",
+      "language": "en",
+      "reference": "it's like the electronic games",
+      "text": "Like electronic games.",
+      "raw": "language English<asr_text>Like electronic games.",
+      "seconds": 0.18778849998489022,
+      "audio_seconds": 2.2099375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 58.717,
+        "prompt_per_token_ms": 1.1983061224489795,
+        "prompt_per_second": 834.5112999642353,
+        "predicted_n": 8,
+        "predicted_ms": 104.604,
+        "predicted_per_token_ms": 14.943428571428571,
+        "predicted_per_second": 66.91904707276969
+      },
+      "completion_tokens": 8,
+      "peak_device_mib": 4648.38671875,
+      "mer": {
+        "errors": 2,
+        "reference_units": 5
+      },
+      "iteration": 1
+    },
+    {
+      "id": "00530",
+      "language": "en",
+      "reference": "it's like the electronic games",
+      "text": "Like electronic games.",
+      "raw": "language English<asr_text>Like electronic games.",
+      "seconds": 0.1851596999913454,
+      "audio_seconds": 2.2099375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 58.693,
+        "prompt_per_token_ms": 1.197816326530612,
+        "prompt_per_second": 834.8525377813368,
+        "predicted_n": 8,
+        "predicted_ms": 97.867,
+        "predicted_per_token_ms": 13.981,
+        "predicted_per_second": 71.52564194263644
+      },
+      "completion_tokens": 8,
+      "peak_device_mib": 4648.38671875,
+      "mer": {
+        "errors": 2,
+        "reference_units": 5
+      },
+      "iteration": 2
+    },
+    {
+      "id": "00530",
+      "language": "en",
+      "reference": "it's like the electronic games",
+      "text": "Like electronic games.",
+      "raw": "language English<asr_text>Like electronic games.",
+      "seconds": 0.17927449999842793,
+      "audio_seconds": 2.2099375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 57.8,
+        "prompt_per_token_ms": 1.1795918367346938,
+        "prompt_per_second": 847.7508650519031,
+        "predicted_n": 8,
+        "predicted_ms": 94.863,
+        "predicted_per_token_ms": 13.551857142857143,
+        "predicted_per_second": 73.79062437409739
+      },
+      "completion_tokens": 8,
+      "peak_device_mib": 4648.32421875,
+      "mer": {
+        "errors": 2,
+        "reference_units": 5
+      },
+      "iteration": 3
+    },
+    {
+      "id": "00047",
+      "language": "en",
+      "reference": "so I I mean I study I S N in both my bachelorand master um degree so",
+      "text": "So I I mean I study I S M in both my bachelor and master, uh degree. So.",
+      "raw": "language English<asr_text>So I I mean I study I S M in both my bachelor and master, uh degree. So.",
+      "seconds": 0.40754079999169335,
+      "audio_seconds": 7.04,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 114,
+        "prompt_ms": 67.512,
+        "prompt_per_token_ms": 0.5922105263157895,
+        "prompt_per_second": 1688.5886953430502,
+        "predicted_n": 25,
+        "predicted_ms": 316.361,
+        "predicted_per_token_ms": 13.181708333333333,
+        "predicted_per_second": 75.86270115469354
+      },
+      "completion_tokens": 25,
+      "peak_device_mib": 4648.63671875,
+      "mer": {
+        "errors": 4,
+        "reference_units": 17
+      },
+      "iteration": 1
+    },
+    {
+      "id": "00047",
+      "language": "en",
+      "reference": "so I I mean I study I S N in both my bachelorand master um degree so",
+      "text": "So I I mean I study I S M in both my bachelor and master, uh degree. So.",
+      "raw": "language English<asr_text>So I I mean I study I S M in both my bachelor and master, uh degree. So.",
+      "seconds": 0.42886450001969934,
+      "audio_seconds": 7.04,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 114,
+        "prompt_ms": 67.341,
+        "prompt_per_token_ms": 0.5907105263157895,
+        "prompt_per_second": 1692.876553659732,
+        "predicted_n": 25,
+        "predicted_ms": 330.432,
+        "predicted_per_token_ms": 13.768,
+        "predicted_per_second": 72.63219058686809
+      },
+      "completion_tokens": 25,
+      "peak_device_mib": 4648.63671875,
+      "mer": {
+        "errors": 4,
+        "reference_units": 17
+      },
+      "iteration": 2
+    },
+    {
+      "id": "00047",
+      "language": "en",
+      "reference": "so I I mean I study I S N in both my bachelorand master um degree so",
+      "text": "So I I mean I study I S M in both my bachelor and master, uh degree. So.",
+      "raw": "language English<asr_text>So I I mean I study I S M in both my bachelor and master, uh degree. So.",
+      "seconds": 0.400687100016512,
+      "audio_seconds": 7.04,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 114,
+        "prompt_ms": 68.791,
+        "prompt_per_token_ms": 0.6034298245614035,
+        "prompt_per_second": 1657.1935282231689,
+        "predicted_n": 25,
+        "predicted_ms": 315.863,
+        "predicted_per_token_ms": 13.160958333333333,
+        "predicted_per_second": 75.98230878577105
+      },
+      "completion_tokens": 25,
+      "peak_device_mib": 4648.44921875,
+      "mer": {
+        "errors": 4,
+        "reference_units": 17
+      },
+      "iteration": 3
+    },
+    {
+      "id": "00989",
+      "language": "mixed",
+      "reference": "他他make a mistake",
+      "text": "他他 make a mistake.",
+      "raw": "language English<asr_text>他他 make a mistake.",
+      "seconds": 0.19056089996593073,
+      "audio_seconds": 2.2301875,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 57.754,
+        "prompt_per_token_ms": 1.1786530612244897,
+        "prompt_per_second": 848.4260830418672,
+        "predicted_n": 10,
+        "predicted_ms": 125.226,
+        "predicted_per_token_ms": 13.914,
+        "predicted_per_second": 71.87005893344832
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4648.19921875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 5
+      },
+      "iteration": 1
+    },
+    {
+      "id": "00989",
+      "language": "mixed",
+      "reference": "他他make a mistake",
+      "text": "他他 make a mistake.",
+      "raw": "language English<asr_text>他他 make a mistake.",
+      "seconds": 0.1982595999725163,
+      "audio_seconds": 2.2301875,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 59.852,
+        "prompt_per_token_ms": 1.221469387755102,
+        "prompt_per_second": 818.6860923611575,
+        "predicted_n": 10,
+        "predicted_ms": 128.959,
+        "predicted_per_token_ms": 14.328777777777779,
+        "predicted_per_second": 69.78962305849146
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4648.19921875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 5
+      },
+      "iteration": 2
+    },
+    {
+      "id": "00989",
+      "language": "mixed",
+      "reference": "他他make a mistake",
+      "text": "他他 make a mistake.",
+      "raw": "language English<asr_text>他他 make a mistake.",
+      "seconds": 0.18859619996510446,
+      "audio_seconds": 2.2301875,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 57.534,
+        "prompt_per_token_ms": 1.1741632653061225,
+        "prompt_per_second": 851.6703166823096,
+        "predicted_n": 10,
+        "predicted_ms": 122.739,
+        "predicted_per_token_ms": 13.637666666666668,
+        "predicted_per_second": 73.32632659545865
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4648.19921875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 5
+      },
+      "iteration": 3
+    },
+    {
+      "id": "01055",
+      "language": "mixed",
+      "reference": "好那我们现在开始我们第二个topic就是你认为你就是你认为children应不应该有自己的smart phone",
+      "text": "好，那我们现在开始我们第二个topic，就是你认为，你就是你认为，丘疹应不应该有自己的smartphone？",
+      "raw": "language Chinese<asr_text>好，那我们现在开始我们第二个topic，就是你认为，你就是你认为，丘疹应不应该有自己的smartphone？",
+      "seconds": 0.5271426999825053,
+      "audio_seconds": 11.34,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 166,
+        "prompt_ms": 101.896,
+        "prompt_per_token_ms": 0.6138313253012049,
+        "prompt_per_second": 1629.1120358012092,
+        "predicted_n": 30,
+        "predicted_ms": 382.743,
+        "predicted_per_token_ms": 13.19803448275862,
+        "predicted_per_second": 75.76885795429308
+      },
+      "completion_tokens": 30,
+      "peak_device_mib": 4648.01171875,
+      "mer": {
+        "errors": 4,
+        "reference_units": 36
+      },
+      "iteration": 1
+    },
+    {
+      "id": "01055",
+      "language": "mixed",
+      "reference": "好那我们现在开始我们第二个topic就是你认为你就是你认为children应不应该有自己的smart phone",
+      "text": "好，那我们现在开始我们第二个topic，就是你认为，你就是你认为，丘疹应不应该有自己的smartphone？",
+      "raw": "language Chinese<asr_text>好，那我们现在开始我们第二个topic，就是你认为，你就是你认为，丘疹应不应该有自己的smartphone？",
+      "seconds": 0.5133461000514217,
+      "audio_seconds": 11.34,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 166,
+        "prompt_ms": 102.261,
+        "prompt_per_token_ms": 0.6160301204819277,
+        "prompt_per_second": 1623.2972491956857,
+        "predicted_n": 30,
+        "predicted_ms": 386.845,
+        "predicted_per_token_ms": 13.33948275862069,
+        "predicted_per_second": 74.9654254287893
+      },
+      "completion_tokens": 30,
+      "peak_device_mib": 4647.94921875,
+      "mer": {
+        "errors": 4,
+        "reference_units": 36
+      },
+      "iteration": 2
+    },
+    {
+      "id": "01055",
+      "language": "mixed",
+      "reference": "好那我们现在开始我们第二个topic就是你认为你就是你认为children应不应该有自己的smart phone",
+      "text": "好，那我们现在开始我们第二个topic，就是你认为，你就是你认为，丘疹应不应该有自己的smartphone？",
+      "raw": "language Chinese<asr_text>好，那我们现在开始我们第二个topic，就是你认为，你就是你认为，丘疹应不应该有自己的smartphone？",
+      "seconds": 0.5411628999863751,
+      "audio_seconds": 11.34,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 166,
+        "prompt_ms": 102.728,
+        "prompt_per_token_ms": 0.6188433734939759,
+        "prompt_per_second": 1615.9177634140644,
+        "predicted_n": 30,
+        "predicted_ms": 384.058,
+        "predicted_per_token_ms": 13.243379310344828,
+        "predicted_per_second": 75.50942826343937
+      },
+      "completion_tokens": 30,
+      "peak_device_mib": 4647.94921875,
+      "mer": {
+        "errors": 4,
+        "reference_units": 36
+      },
+      "iteration": 3
+    }
+  ],
+  "warmups": [
+    {
+      "id": "01219",
+      "language": "zh",
+      "reference": "就我们会谈到就是",
+      "text": "就我们会谈到，就是。",
+      "raw": "language Chinese<asr_text>就我们会谈到，就是。",
+      "seconds": 0.20691279997117817,
+      "audio_seconds": 2.0,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 59.257,
+        "prompt_per_token_ms": 1.209326530612245,
+        "prompt_per_second": 826.9065258112967,
+        "predicted_n": 10,
+        "predicted_ms": 122.412,
+        "predicted_per_token_ms": 13.601333333333335,
+        "predicted_per_second": 73.52220370551906
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4688.57421875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 8
+      }
+    },
+    {
+      "id": "00819",
+      "language": "zh",
+      "reference": "呃平台接受更多的平台然后两家都有的东西跟我",
+      "text": "呃，平台接触更多的平台，然后了解到更多的东西，跟我。",
+      "raw": "language Chinese<asr_text>呃，平台接触更多的平台，然后了解到更多的东西，跟我。",
+      "seconds": 0.3211384000023827,
+      "audio_seconds": 4.3999375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 75,
+        "prompt_ms": 65.453,
+        "prompt_per_token_ms": 0.8727066666666667,
+        "prompt_per_second": 1145.860388370281,
+        "predicted_n": 18,
+        "predicted_ms": 228.351,
+        "predicted_per_token_ms": 13.432411764705883,
+        "predicted_per_second": 74.44679462756896
+      },
+      "completion_tokens": 18,
+      "peak_device_mib": 4667.48046875,
+      "mer": {
+        "errors": 6,
+        "reference_units": 21
+      }
+    },
+    {
+      "id": "00530",
+      "language": "en",
+      "reference": "it's like the electronic games",
+      "text": "Like electronic games.",
+      "raw": "language English<asr_text>Like electronic games.",
+      "seconds": 0.18764200003352016,
+      "audio_seconds": 2.2099375,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 59.26,
+        "prompt_per_token_ms": 1.2093877551020409,
+        "prompt_per_second": 826.8646641916976,
+        "predicted_n": 8,
+        "predicted_ms": 96.921,
+        "predicted_per_token_ms": 13.845857142857144,
+        "predicted_per_second": 72.22376987443381
+      },
+      "completion_tokens": 8,
+      "peak_device_mib": 4648.29296875,
+      "mer": {
+        "errors": 2,
+        "reference_units": 5
+      }
+    },
+    {
+      "id": "00047",
+      "language": "en",
+      "reference": "so I I mean I study I S N in both my bachelorand master um degree so",
+      "text": "So I I mean I study I S M in both my bachelor and master, uh degree. So.",
+      "raw": "language English<asr_text>So I I mean I study I S M in both my bachelor and master, uh degree. So.",
+      "seconds": 0.43641540000680834,
+      "audio_seconds": 7.04,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 114,
+        "prompt_ms": 68.063,
+        "prompt_per_token_ms": 0.5970438596491229,
+        "prompt_per_second": 1674.918825206059,
+        "predicted_n": 25,
+        "predicted_ms": 316.667,
+        "predicted_per_token_ms": 13.194458333333332,
+        "predicted_per_second": 75.78939390590116
+      },
+      "completion_tokens": 25,
+      "peak_device_mib": 4648.63671875,
+      "mer": {
+        "errors": 4,
+        "reference_units": 17
+      }
+    },
+    {
+      "id": "00989",
+      "language": "mixed",
+      "reference": "他他make a mistake",
+      "text": "他他 make a mistake.",
+      "raw": "language English<asr_text>他他 make a mistake.",
+      "seconds": 0.2748987000086345,
+      "audio_seconds": 2.2301875,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 49,
+        "prompt_ms": 61.389,
+        "prompt_per_token_ms": 1.2528367346938776,
+        "prompt_per_second": 798.1886005636188,
+        "predicted_n": 10,
+        "predicted_ms": 120.774,
+        "predicted_per_token_ms": 13.419333333333334,
+        "predicted_per_second": 74.51935019126633
+      },
+      "completion_tokens": 10,
+      "peak_device_mib": 4648.19921875,
+      "mer": {
+        "errors": 0,
+        "reference_units": 5
+      }
+    },
+    {
+      "id": "01055",
+      "language": "mixed",
+      "reference": "好那我们现在开始我们第二个topic就是你认为你就是你认为children应不应该有自己的smart phone",
+      "text": "好，那我们现在开始我们第二个topic，就是你认为，你就是你认为，丘疹应不应该有自己的smartphone？",
+      "raw": "language Chinese<asr_text>好，那我们现在开始我们第二个topic，就是你认为，你就是你认为，丘疹应不应该有自己的smartphone？",
+      "seconds": 0.5240779999876395,
+      "audio_seconds": 11.34,
+      "finish_reason": "stop",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 166,
+        "prompt_ms": 102.285,
+        "prompt_per_token_ms": 0.6161746987951807,
+        "prompt_per_second": 1622.9163611477734,
+        "predicted_n": 30,
+        "predicted_ms": 383.513,
+        "predicted_per_token_ms": 13.22458620689655,
+        "predicted_per_second": 75.61673267920514
+      },
+      "completion_tokens": 30,
+      "peak_device_mib": 4648.19921875,
+      "mer": {
+        "errors": 4,
+        "reference_units": 36
+      }
+    }
+  ],
+  "device_before_load_mib": 1407.56640625,
+  "load_seconds": 2.585546799993608,
+  "device_loaded_mib": 4625.56640625,
+  "gpu_snapshot": "name, driver_version, memory.used [MiB], clocks.current.sm [MHz], temperature.gpu\nNVIDIA GeForce RTX 4050 Laptop GPU, 610.88, 4405 MiB, 2055 MHz, 54",
+  "performance_ids": [
+    "01219",
+    "00819",
+    "00530",
+    "00047",
+    "00989",
+    "01055"
+  ],
+  "summary": {
+    "overall_mer": {
+      "errors": 39,
+      "reference_units": 433,
+      "rate": 0.09006928406466513
+    },
+    "by_language": {
+      "zh": {
+        "errors": 10,
+        "reference_units": 139,
+        "rate": 0.07194244604316546
+      },
+      "en": {
+        "errors": 12,
+        "reference_units": 83,
+        "rate": 0.14457831325301204
+      },
+      "mixed": {
+        "errors": 17,
+        "reference_units": 211,
+        "rate": 0.08056872037914692
+      }
+    },
+    "nonstop_outputs": 0,
+    "performance": {
+      "01219": {
+        "median_seconds": 0.2105714000063017,
+        "min_seconds": 0.20980010001221672,
+        "max_seconds": 0.2116140999714844,
+        "decode_ms_per_token": 13.646888888888888,
+        "stable_text": true
+      },
+      "00819": {
+        "median_seconds": 0.31519069999922067,
+        "min_seconds": 0.31231849995674565,
+        "max_seconds": 0.34043010004097596,
+        "decode_ms_per_token": 13.290764705882353,
+        "stable_text": true
+      },
+      "00530": {
+        "median_seconds": 0.1851596999913454,
+        "min_seconds": 0.17927449999842793,
+        "max_seconds": 0.18778849998489022,
+        "decode_ms_per_token": 13.981,
+        "stable_text": true
+      },
+      "00047": {
+        "median_seconds": 0.40754079999169335,
+        "min_seconds": 0.400687100016512,
+        "max_seconds": 0.42886450001969934,
+        "decode_ms_per_token": 13.181708333333333,
+        "stable_text": true
+      },
+      "00989": {
+        "median_seconds": 0.19056089996593073,
+        "min_seconds": 0.18859619996510446,
+        "max_seconds": 0.1982595999725163,
+        "decode_ms_per_token": 13.914,
+        "stable_text": true
+      },
+      "01055": {
+        "median_seconds": 0.5271426999825053,
+        "min_seconds": 0.5133461000514217,
+        "max_seconds": 0.5411628999863751,
+        "decode_ms_per_token": 13.243379310344828,
+        "stable_text": true
+      }
+    },
+    "peak_device_mib": 4781.91796875
+  }
+}

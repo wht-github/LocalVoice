@@ -20,4 +20,6 @@
 
 `--split holdout` 只在 pilot 选择候选之后使用。每个结果保存在 `results/<tag>-<split>.json`；音频、模型和详细服务日志分别在 `.runtime/` 与 `outputs/qwen-real/`。每个 JSON 包含原始转写、计分分子/分母、每次性能数据与运行条件。
 
+完整实验结束后运行 `scripts/summarize-qwen-real.py`，核对配置与 GPU 放置并重建 CSV/Markdown 简表。最终解释见 `docs/qwen-asr-quantization-results.md`。原始记录保留 pilot 退化的样本，不因推荐 Q4 而删除。
+
 `ascend-manifest.json` 中的转写来自 [CAiRE/ASCEND](https://huggingface.co/datasets/CAiRE/ASCEND)，按 CC-BY-SA-4.0 提供；署名与版本见清单。本次选出的 60 条录音只有两位说话人，总计约 250 秒。pilot/holdout 分离不能解决说话人覆盖不足。

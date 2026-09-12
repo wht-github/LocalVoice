@@ -10,6 +10,8 @@ Windows 原生 NVIDIA GPU 使用独立的 PyTorch CUDA / Transformers 环境，�
 
 下一项 [RMSNorm 单项实验](docs/rmsnorm-lab.md) 用 `.\rmsnorm-lab.ps1 --baseline` 运行 Qwen 原始基线；只修改 RMSNorm 后再与它对照，不叠加其他推理优化。
 
+原生 llama.cpp 路线已完成 [CUDA 环境配置](docs/llama-native-windows.md) 和 [1.7B 量化、解码消融及真人录音评测](docs/qwen-asr-quantization-results.md)。实验固定同一模型和音频编码器，提供 BF16/Q8/Q6/Q4 对照、独立 holdout 与逐条转写；复现步骤见 [实验入口](experiments/qwen_asr/README.md)。
+
 ## 打开和管理
 
 Windows 原生悬浮窗使用 Rust + Slint：运行 `./desktop.ps1` 启动客户端（按已保存设置启动识别进程）。默认 `Ctrl+Alt+Space` 开始/结束听写，`Ctrl+Alt+R` 朗读选中文字或停止播放。使用说明和兼容边界见 [桌面客户端](desktop/README.md)。
