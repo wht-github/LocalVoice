@@ -1,4 +1,5 @@
 """Download the pinned Qwen3-ASR 1.7B Q8 decoder and BF16 audio encoder."""
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -14,6 +15,7 @@ FILES = {
     'Qwen3-ASR-1.7B-Q8_0.gguf': (2165034944, '58e22d0532d4eacaf034cfac17a6fed159f37c41390c710186783be439d1fc57'),
     'mmproj-Qwen3-ASR-1.7B-bf16.gguf': (641773984, '8882e9ddab3186f9aa71b1417c847177913e1466655ac944cf86e9b846735d62'),
 }
+BF16 = ('Qwen3-ASR-1.7B-bf16.gguf', (4069674944, '1af18763dfafde2bbf071ef8a0952f7bee66f140c3565e5ccc5afb07dc1f9227'))
 
 
 def download(item):
@@ -45,6 +47,11 @@ def download(item):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--with-bf16', action='store_true', help='Also download the source for local quantization.')
+    args = parser.parse_args()
+    if args.with_bf16:
+        FILES[BF16[0]] = BF16[1]
     DEST.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(download, FILES.items()))
