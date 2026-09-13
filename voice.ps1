@@ -34,7 +34,7 @@ switch ($Action) {
         # Explicit host-to-guest transfer; no Windows drive mount is needed.
         $null = New-Item -ItemType Directory -Force -Path (Join-Path $PSScriptRoot '.runtime')
         $bundle = Join-Path $PSScriptRoot '.runtime/service-bundle.tar'
-        & tar -cf $bundle -C $PSScriptRoot asr_server.py tts_server.py tester.html smoke_test.py scripts requirements-asr.txt requirements-asr-gpu.txt requirements-tts.txt requirements-melo.txt uv.toml
+        & tar -cf $bundle -C $PSScriptRoot asr_server.py tts_server.py tester.html smoke_test.py scripts requirements-asr.txt requirements-tts.txt requirements-melo.txt uv.toml
         if ($LASTEXITCODE -ne 0) { throw 'Could not package service files.' }
         & wsl -d LocalVoice -u root --cd / --exec mkdir -p /opt/local-voice-app
         if ($LASTEXITCODE -ne 0) { throw 'Could not prepare LocalVoice deployment directory.' }

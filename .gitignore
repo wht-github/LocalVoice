@@ -5,4 +5,3 @@ __pycache__/
 .venv*/
 desktop/target/
 .cargo-home/
-external/llama.cpp/

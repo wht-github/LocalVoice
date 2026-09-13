@@ -125,12 +125,7 @@ fn stop_native_child(child: &mut Child) -> Result<()> {
 }
 fn native_start(config: &Config) -> Result<()> {
     let script = server_script()?.canonicalize()?;
-    let root = script.parent().context("无法定位识别项目目录")?;
-    let python = if config.asr_mode.starts_with("qwen-") {
-        root.join(".venv-qwen").join("Scripts").join("python.exe")
-    } else {
-        venv_python()
-    };
+    let python = venv_python();
     if !python.is_file() {
         bail!(
             "识别环境未安装（{}）；请运行对应的 setup 安装脚本",

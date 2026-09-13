@@ -2,7 +2,7 @@
 
 以下为 Kokoro 历史基线。当前已换成 MeloTTS；新测量见 [Melo 与服务管理](melo-and-service-control.md)，原始数据为 `outputs/resource-profile-melo.json`。本次没有修改以下服务组额度或任何 WSL 全局配置。
 
-2026-09-06，本机 Ryzen 7 7840H（8 物理核心 / 16 逻辑处理器）、RTX 4050 Laptop 6 GB。两个服务都使用 CPU 版 PyTorch，各为 4 个计算线程，采用系统默认同等调度权重。曾短暂将 TTS 降为 2 个线程并偏重 ASR，现按用户“不必严格限制竞争”的偏好取消。两个服务合计的资源上限保留。GPU 推理尚未安装或实测，后续结果见 [长混读测试](long-mixed-asr-test.md)。
+2026-09-06，本机 Ryzen 7 7840H（8 物理核心 / 16 逻辑处理器）、RTX 4050 Laptop 6 GB。两个服务都使用 CPU 版 PyTorch，各为 4 个计算线程，采用系统默认同等调度权重。曾短暂将 TTS 降为 2 个线程并偏重 ASR，现按用户“不必严格限制竞争”的偏好取消。两个服务合计的资源上限保留。这是历史 WSL CPU 部署记录。当前 Windows 三模型部署见 [模型说明](qwen-llama-desktop.md)；旧 GPU 测试已归档到 Git 标签 archive/asr-optimization-20260913。
 
 ## 实测与资源建议
 

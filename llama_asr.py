@@ -71,7 +71,7 @@ class LlamaASR:
         directory = root / f".runtime/models/Qwen3-ASR-{size}-GGUF"
         decoder = directory / f"Qwen3-ASR-{size}-Q8_0.gguf"
         encoder = directory / f"mmproj-Qwen3-ASR-{size}-bf16.gguf"
-        executable = root / ".runtime/llama-build/bin/llama-server.exe"
+        executable = root / ".runtime/llama/llama-server.exe"
         for path in (executable, decoder, encoder):
             if not path.is_file():
                 raise FileNotFoundError(f"缺少 {path}；请按 docs/qwen-llama-desktop.md 安装环境和模型。")
@@ -86,7 +86,6 @@ class LlamaASR:
             port = sock.getsockname()[1]
         self.url = f"http://127.0.0.1:{port}"
         env = os.environ.copy()
-        env["PATH"] = str(root / ".venv-llama-build/Lib/site-packages/nvidia/cu13/bin/x86_64") + os.pathsep + env["PATH"]
         env["LLAMA_API_KEY"] = self.key
         for name in ("GGML_CUDA_DISABLE_GRAPHS", "GGML_CUDA_GRAPH_OPT", "GGML_CUDA_PDL"):
             env.pop(name, None)

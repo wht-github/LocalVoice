@@ -1,10 +1,9 @@
-"""Local STT: SenseVoice CPU, Qwen llama.cpp/Transformers CUDA, or Qwen vLLM."""
+"""Local STT: SenseVoice CPU or Qwen ASR through official llama.cpp CUDA binaries."""
 import io
 import os
 import re
 import threading
 import time
-from pathlib import Path
 from contextlib import asynccontextmanager
 
 import numpy as np
@@ -14,31 +13,22 @@ from starlette.concurrency import run_in_threadpool
 
 BACKEND = os.environ.get("ASR_BACKEND", "sensevoice-cpu")
 LLAMA = BACKEND in {"qwen-llama-0.6b", "qwen-llama-1.7b"}
-if not LLAMA and BACKEND not in {"sensevoice-cpu", "qwen-vllm", "qwen-native"}:
+if not LLAMA and BACKEND != "sensevoice-cpu":
     raise ValueError("Unknown ASR_BACKEND")
-MODEL_ID = "Qwen/Qwen3-ASR-0.6B" if BACKEND == "qwen-vllm" else "FunAudioLLM/SenseVoiceSmall"
+MODEL_ID = "FunAudioLLM/SenseVoiceSmall"
 if LLAMA:
     from llama_asr import SIZES
     MODEL_ID = f"Qwen3-ASR-{SIZES[BACKEND]}-Q8_0"
-if BACKEND == "qwen-native":
-    MODEL_ID = "Qwen/Qwen3-ASR-0.6B-hf"
-    root = Path(__file__).resolve().parent
-    os.environ.setdefault("HF_HOME", str(root / ".runtime" / "qwen-hf"))
-    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
-    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
-    os.environ.setdefault("NUMBA_CACHE_DIR", str(root / ".runtime" / "numba-cache"))
 DEVICE = "cpu" if BACKEND == "sensevoice-cpu" else "cuda:0"
 MAX_BYTES = 20 * 1024 * 1024
 MAX_SECONDS = 30
 lock = threading.Lock()
 model = None
-processor = None
 
 
 @asynccontextmanager
 async def lifespan(app):
-    global model, processor
+    global model
     if LLAMA:
         from llama_asr import LlamaASR
         model = LlamaASR(BACKEND)
@@ -53,46 +43,25 @@ async def lifespan(app):
         return
     import torch
     torch.set_num_threads(int(os.environ.get("ASR_THREADS", "4")))
-    if DEVICE != "cpu" and not torch.cuda.is_available():
-        raise RuntimeError("CUDA unavailable; choose SenseVoice CPU mode")
-    if BACKEND == "qwen-vllm":
-        from qwen_asr import Qwen3ASRModel
-        from pathlib import Path
-        path = (Path(os.environ["VOICE_RUNTIME"]) / "qwen-model.path").read_text().strip()
-        model = Qwen3ASRModel.LLM(
-            model=path, gpu_memory_utilization=0.60,
-            max_model_len=3072, max_num_seqs=1, max_new_tokens=1024,
-            enforce_eager=True,
-        )
-    elif BACKEND == "qwen-native":
-        from transformers import AutoModelForMultimodalLM, AutoProcessor
-        path = os.environ.get("ASR_MODEL", MODEL_ID)
-        processor = AutoProcessor.from_pretrained(path)
-        model = AutoModelForMultimodalLM.from_pretrained(
-            path, dtype=torch.float16, attn_implementation="sdpa",
-        ).to(DEVICE).eval()
-    else:
-        from funasr import AutoModel
-        from huggingface_hub import snapshot_download
-        from huggingface_hub.errors import LocalEntryNotFoundError
-        path = os.environ.get("ASR_MODEL")
-        if not path:
-            try:
-                path = snapshot_download(MODEL_ID, local_files_only=True)
-            except LocalEntryNotFoundError:
-                path = MODEL_ID  # First install can still download the model.
-        model = AutoModel(
-            model=path,
-            hub="hf", device=DEVICE, ncpu=4, disable_update=True,
-            trust_remote_code=False,
-        )
+    from funasr import AutoModel
+    from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
+    path = os.environ.get("ASR_MODEL")
+    if not path:
+        try:
+            path = snapshot_download(MODEL_ID, local_files_only=True)
+        except LocalEntryNotFoundError:
+            path = MODEL_ID  # First install can still download the model.
+    model = AutoModel(
+        model=path, hub="hf", device="cpu", ncpu=4,
+        disable_update=True, trust_remote_code=False,
+    )
     # Complete lazy imports/JIT and a short inference before accepting requests.
     import librosa
     warm_audio = librosa.resample(np.zeros(24000, dtype=np.float32), orig_sr=24000, target_sr=16000)
     infer(warm_audio, "auto", warmup=True)
     yield
     model = None
-    processor = None
 
 
 app = FastAPI(title="Local speech recognition", lifespan=lifespan)
@@ -102,33 +71,13 @@ app = FastAPI(title="Local speech recognition", lifespan=lifespan)
 def health():
     ready = model is not None and (not LLAMA or model.child.poll() is None)
     return {"ready": ready, "model": MODEL_ID,
-            "backend": "llama.cpp" if LLAMA else {"qwen-vllm": "vllm", "qwen-native": "transformers", "sensevoice-cpu": "funasr"}[BACKEND],
+            "backend": "llama.cpp" if LLAMA else "funasr",
             "mode": BACKEND, "device": DEVICE}
 
 
 def infer(samples, language, warmup=False):
     if LLAMA:
         return model.transcribe(samples, language, warmup)
-    if BACKEND == "qwen-native":
-        import torch
-        # Avoid hallucinations for actual digital silence, including warm-up audio.
-        if not warmup and not np.any(samples):
-            return {"text": "", "language": language, "tags": [], "raw_text": ""}
-        inputs = processor.apply_transcription_request(
-            audio=samples, language={"auto": None, "zh": "Chinese", "en": "English"}[language],
-        ).to(model.device, model.dtype)
-        with torch.inference_mode():
-            output = model.generate(**inputs, max_new_tokens=16 if warmup else 1024, do_sample=False)
-        tokens = output[:, inputs["input_ids"].shape[1]:]
-        if tokens.shape[1] >= 1024:
-            raise RuntimeError("Recognition output exceeded the token limit; use shorter recordings.")
-        result = processor.decode(tokens, return_format="parsed")[0]
-        text = result["transcription"].strip() if np.any(samples) else ""
-        return {"text": text, "language": result["language"] or language, "tags": [], "raw_text": text}
-    if BACKEND == "qwen-vllm":
-        result = model.transcribe(audio=(samples, 16000),
-                                 language={"auto": None, "zh": "Chinese", "en": "English"}[language])[0]
-        return {"text": result.text, "language": result.language, "tags": [], "raw_text": result.text}
     result = model.generate(input=samples, cache={}, language=language,
                             use_itn=True, batch_size=1, disable_pbar=True)[0]
     raw = result["text"]

@@ -637,12 +637,6 @@ fn main() -> Result<()> {
             args.get(3)
                 .ok_or_else(|| anyhow::anyhow!("report path required"))?,
         ),
-        Some("--qwen-runtime-check") => verification::qwen_runtime_check(
-            args.get(2)
-                .ok_or_else(|| anyhow::anyhow!("input WAV required"))?,
-            args.get(3)
-                .ok_or_else(|| anyhow::anyhow!("report path required"))?,
-        ),
         Some("--manual-asr-check") => verification::manual_asr(
             args.get(2)
                 .ok_or_else(|| anyhow::anyhow!("input WAV required"))?,

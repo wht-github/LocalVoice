@@ -2,13 +2,11 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-// Order shared by settings display and persistence; keep the original backend
-// available for existing settings and controlled PyTorch comparisons.
+// Order shared by settings display and persistence.
 pub const ASR_MODES: &[(&str, &str)] = &[
     ("sensevoice-cpu", "SenseVoice · CPU"),
     ("qwen-llama-0.6b", "llama · Qwen ASR 0.6B Q8"),
     ("qwen-llama-1.7b", "llama · Qwen ASR 1.7B Q8"),
-    ("qwen-native", "PyTorch · Qwen ASR 0.6B"),
 ];
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -42,7 +40,7 @@ impl Default for Config {
             speed: 1.,
             silence_ms: 700,
             speech_threshold: 0.008,
-            tts_enabled: true,
+            tts_enabled: false,
             auto_start_services: true,
         }
     }
@@ -104,7 +102,7 @@ mod tests {
     #[test]
     fn old_settings_keep_service_start_enabled() {
         let config: Config = serde_json::from_str(r#"{"voice":"zf_xiaobei"}"#).unwrap();
-        assert!(config.tts_enabled && config.auto_start_services);
+        assert!(!config.tts_enabled && config.auto_start_services);
         assert_eq!(config.voice, "zf_xiaobei");
         assert!(!config.continuous_dictation);
     }
@@ -128,16 +126,16 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert_eq!(restored.asr_mode, "sensevoice-cpu");
         let qwen = Config {
-            asr_mode: "qwen-native".into(),
+            asr_mode: "qwen-llama-0.6b".into(),
             ..Config::default()
         };
         qwen.validate().unwrap();
         let restored: Config =
             serde_json::from_str(&serde_json::to_string(&qwen).unwrap()).unwrap();
-        assert_eq!(restored.asr_mode, "qwen-native");
+        assert_eq!(restored.asr_mode, "qwen-llama-0.6b");
         // Historical values (WSL qwen-vllm, removed sensevoice-gpu) no longer validate;
         // load() rejects them and the app falls back to defaults.
-        for mode in ["qwen-vllm", "sensevoice-gpu", "other"] {
+        for mode in ["qwen-native", "qwen-vllm", "sensevoice-gpu", "other"] {
             assert!(
                 Config {
                     asr_mode: mode.into(),

@@ -12,7 +12,7 @@ for file in asr_server.py tts_server.py tester.html smoke_test.py; do
         install -m 644 "$PROJECT_DIR/$file" "$DEPLOY_DIR/$file"
     fi
 done
-for file in env.sh run-service.sh smoke-test.sh select-asr.sh install-asr-gpu.sh profile-asr.py download-qwen-asr.py; do
+for file in env.sh run-service.sh smoke-test.sh; do
     if [[ "$PROJECT_DIR" != "$DEPLOY_DIR" ]]; then
         install -m 644 "$PROJECT_DIR/scripts/$file" "$DEPLOY_DIR/scripts/$file"
     fi
