@@ -1,6 +1,7 @@
 """Run one explicit Qwen 1.7B configuration on the frozen ASCEND manifest."""
 import argparse
 import base64
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -31,7 +32,16 @@ def main():
     parser.add_argument('--flash', choices=['on', 'off'], default='on')
     parser.add_argument('--no-cuda-graphs', action='store_true')
     parser.add_argument('--gpu-layers', type=int, default=99)
+    parser.add_argument('--context', type=int, default=1024)
+    parser.add_argument('--repetitions', type=int, default=3)
+    parser.add_argument('--nvtx', action='store_true', help='Mark HTTP request ranges for an external Nsight capture.')
+    parser.add_argument('--results-dir', type=Path, default=ROOT / 'experiments/qwen_asr/results')
+    parser.add_argument('--nsys-session', help='Stop this named Nsight session before terminating the CUDA server.')
     args = parser.parse_args()
+    if args.context < 1024 or args.repetitions < 1:
+        parser.error('Use context >= 1024 and at least one repetition')
+    if args.nvtx:
+        import nvtx
     manifest_path = ROOT / 'experiments/qwen_asr/ascend-manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     cases = [r for r in manifest['samples'] if r['split'] == args.split]
@@ -45,8 +55,8 @@ def main():
         encoded[row['id']] = base64.b64encode(path.read_bytes()).decode('ascii')
     mmproj = MODELS / 'mmproj-Qwen3-ASR-1.7B-bf16.gguf'
     key = f'{args.tag}-{args.split}'
-    results = ROOT / 'experiments/qwen_asr/results'
-    results.mkdir(exist_ok=True)
+    results = args.results_dir
+    results.mkdir(parents=True, exist_ok=True)
     logs = ROOT / 'outputs/qwen-real'
     logs.mkdir(parents=True, exist_ok=True)
     destination = results / f'{key}.json'
@@ -65,10 +75,12 @@ def main():
     command = [str(ROOT / '.runtime/llama-build/bin/llama-server.exe'),
                '-m', str(args.model.resolve()), '--mmproj', str(mmproj),
                '--host', '127.0.0.1', '--port', str(port), '-ngl', str(args.gpu_layers),
-               '-c', '1024', '-b', '256', '-ub', '256', '-np', '1', '-t', '4', '-tb', '4',
+               '--device', 'CUDA0', '-c', str(args.context), '-b', '256', '-ub', '256', '-np', '1', '-t', '4', '-tb', '4',
                '-fa', args.flash, '-ctk', 'f16', '-ctv', 'f16', '--fit', 'off',
                '--cache-ram', '0', '--no-cache-idle-slots', '--no-context-shift', '-lv', '4']
     report = {'tag': args.tag, 'split': args.split, 'command': command,
+              'context': args.context, 'repetitions': args.repetitions, 'nvtx_markers': args.nvtx,
+              'nsys_session': args.nsys_session,
               'cuda_graphs_disabled': args.no_cuda_graphs, 'model_sha256': sha256(args.model),
               'model_bytes': args.model.stat().st_size, 'mmproj_sha256': sha256(mmproj),
               'manifest_sha256': sha256(manifest_path),
@@ -104,13 +116,15 @@ def main():
             'nvidia-smi', '--query-gpu=name,driver_version,memory.used,clocks.sm,temperature.gpu',
             '--format=csv'], text=True, creationflags=subprocess.CREATE_NO_WINDOW).strip()
 
-        def infer(case):
+        def infer(case, phase='quality', iteration=0):
             payload = {'messages': [{'role': 'user', 'content': [
                 {'type': 'input_audio', 'input_audio': {'data': encoded[case['id']], 'format': 'wav'}}]}],
                 'temperature': 0, 'max_tokens': 512, 'cache_prompt': False, 'stream': False, 'seed': 42}
             sample_start = len(sampler.samples)
             begin = time.perf_counter()
-            response = request_json(endpoint + '/v1/chat/completions', payload)
+            label = f'{phase}/{case["id"]}/{iteration}'
+            with nvtx.annotate(label, domain='qwen-asr') if args.nvtx else nullcontext():
+                response = request_json(endpoint + '/v1/chat/completions', payload)
             elapsed = time.perf_counter() - begin
             choice = response['choices'][0]
             raw = choice['message']['content'] or ''
@@ -135,9 +149,9 @@ def main():
             performance_cases.extend([subset[0], subset[-1]])
         report['performance_ids'] = [r['id'] for r in performance_cases]
         for case in performance_cases:
-            report['warmups'].append(infer(case))
-            for iteration in range(3):
-                row = infer(case)
+            report['warmups'].append(infer(case, 'warmup'))
+            for iteration in range(args.repetitions):
+                row = infer(case, 'performance', iteration + 1)
                 row['iteration'] = iteration + 1
                 report['performance'].append(row)
                 save()
@@ -157,6 +171,17 @@ def main():
         }
         save()
         print(f'{key}: DONE MER={report["summary"]["overall_mer"]["rate"]:.3%}', flush=True)
+        if args.nsys_session:
+            # TerminateProcess skips CUPTI shutdown on Windows. Stop collection
+            # while the CUDA process is alive so the profiler can drain buffers.
+            nsys = ROOT / '.runtime/nsight-systems/target-windows-x64/nsys.exe'
+            stopped = subprocess.run([str(nsys), 'stop', '--session', args.nsys_session],
+                                     capture_output=True, text=True, timeout=120,
+                                     creationflags=subprocess.CREATE_NO_WINDOW)
+            (logs / f'{key}-nsys-stop.log').write_text(stopped.stdout + stopped.stderr, encoding='utf-8')
+            stopped.check_returncode()
+            report['nsys_stopped_before_model_exit'] = True
+            save()
     except Exception as error:
         report['error'] = repr(error)
         save()

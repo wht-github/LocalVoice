@@ -12,6 +12,8 @@ Qwen3-ASR vLLM 曾在 WSL 中验证过（数据见 [STT 模式](docs/asr-gpu-and
 
 原生 llama.cpp 路线已完成 [CUDA 环境配置](docs/llama-native-windows.md) 和 [1.7B 量化、解码消融及真人录音评测](docs/qwen-asr-quantization-results.md)。实验固定同一模型和音频编码器，提供 BF16/Q8/Q6/Q4 对照、独立 holdout 与逐条转写；复现步骤见 [实验入口](experiments/qwen_asr/README.md)。
 
+桌面 1.7B Q8 参数下的 [公开录音性能基线与 Nsight 剖析](docs/qwen-asr-nsight.md) 已完成，包含预热请求热点、阶段计时、显存构成及下一步单变量优化方向。
+
 ## 打开和管理
 
 Windows 原生悬浮窗使用 Rust + Slint：运行 `./desktop.ps1` 启动客户端（按已保存设置启动识别进程）。默认 `Ctrl+Alt+Space` 开始/结束听写，`Ctrl+Alt+R` 朗读选中文字或停止播放。使用说明和兼容边界见 [桌面客户端](desktop/README.md)。
