@@ -46,13 +46,11 @@ impl Default for Config {
     }
 }
 impl Config {
-    pub fn path() -> PathBuf {
-        PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_else(|| ".".into()))
-            .join("LocalVoice")
-            .join("settings.json")
+    pub fn path() -> Result<PathBuf> {
+        Ok(crate::paths::runtime()?.join("settings.json"))
     }
     pub fn load() -> Result<Self> {
-        let path = Self::path();
+        let path = Self::path()?;
         if !path.exists() {
             return Ok(Self::default());
         }
@@ -89,7 +87,7 @@ impl Config {
     }
     pub fn save(&self) -> Result<()> {
         self.validate()?;
-        let path = Self::path();
+        let path = Self::path()?;
         std::fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(path, serde_json::to_vec_pretty(self)?)?;
         Ok(())

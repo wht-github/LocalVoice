@@ -5,7 +5,6 @@ use anyhow::{Context, Result, bail};
 use std::{
     fs::OpenOptions,
     os::windows::process::CommandExt,
-    path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex, OnceLock,
@@ -62,35 +61,6 @@ static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 // dormant distro just to run `systemctl stop`.
 static TTS_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-fn venv_python() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(|dir| {
-            PathBuf::from(dir)
-                .join("LocalVoice")
-                .join("venv")
-                .join("Scripts")
-                .join("python.exe")
-        })
-        .unwrap_or_else(|| "python.exe".into())
-}
-fn server_script() -> Result<PathBuf> {
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-    let Some(dir) = exe_dir else {
-        bail!("无法定位程序目录");
-    };
-    // Repo layout desktop/target/release plus a flat exe-next-to-script install.
-    for candidate in [
-        dir.join("asr_server.py"),
-        dir.join("..").join("..").join("..").join("asr_server.py"),
-    ] {
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-    bail!("未找到 asr_server.py；请从项目仓库内启动，或把 asr_server.py 放到程序同目录");
-}
 fn native_health(config: &Config) -> Option<serde_json::Value> {
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
@@ -124,8 +94,9 @@ fn stop_native_child(child: &mut Child) -> Result<()> {
     Ok(())
 }
 fn native_start(config: &Config) -> Result<()> {
-    let script = server_script()?.canonicalize()?;
-    let python = venv_python();
+    let root = crate::paths::root()?;
+    let script = root.join("asr_server.py");
+    let python = root.join(".venv/Scripts/python.exe");
     if !python.is_file() {
         bail!(
             "识别环境未安装（{}）；请运行对应的 setup 安装脚本",
@@ -166,9 +137,7 @@ fn native_start(config: &Config) -> Result<()> {
             );
         }
     }
-    let log_dir = std::env::var_os("LOCALAPPDATA")
-        .map(|dir| PathBuf::from(dir).join("LocalVoice"))
-        .unwrap_or_else(|| PathBuf::from("."));
+    let log_dir = crate::paths::runtime()?;
     let _ = std::fs::create_dir_all(&log_dir);
     let open_log = || {
         OpenOptions::new()
@@ -334,9 +303,7 @@ pub fn apply(operation: Operation, cancelled: impl Fn() -> bool) -> Result<Strin
             let mut guard = lock.lock().unwrap();
             if let Some(child) = guard.child.as_mut() {
                 if let Some(status) = child.try_wait()? {
-                    bail!(
-                        "识别进程启动失败（{status}）；请查看 %LOCALAPPDATA%/LocalVoice/native-asr.log"
-                    );
+                    bail!("识别进程启动失败（{status}）；请查看 .runtime/native-asr.log");
                 }
             }
         }

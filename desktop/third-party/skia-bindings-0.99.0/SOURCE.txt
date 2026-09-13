@@ -1,0 +1,1 @@
+https://github.com/rust-skia/rust-skia/blob/a25a0fdb7d90429aa2d1355eab3b910ced359f50/LICENSE

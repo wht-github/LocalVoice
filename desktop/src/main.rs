@@ -3,6 +3,7 @@ mod audio;
 mod config;
 mod diagnostics;
 mod native;
+mod paths;
 mod runtime;
 mod service;
 mod text;

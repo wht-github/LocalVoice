@@ -8,7 +8,7 @@ static LOCK: Mutex<()> = Mutex::new(());
 
 pub fn record(event: &str, fields: serde_json::Value) {
     let Ok(_guard) = LOCK.lock() else { return };
-    let Some(directory) = crate::config::Config::path().parent().map(|p| p.to_owned()) else {
+    let Ok(directory) = crate::paths::runtime() else {
         return;
     };
     let _ = std::fs::create_dir_all(&directory);

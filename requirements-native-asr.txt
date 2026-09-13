@@ -1,4 +1,6 @@
 funasr==1.4.14
+torch==2.11.0+cpu
+torchaudio==2.11.0+cpu
 numpy>=1.26,<3
 huggingface-hub>=1,<2
 modelscope>=1.33,<2

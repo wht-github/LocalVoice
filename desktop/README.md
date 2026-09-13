@@ -6,7 +6,7 @@ Rust + Slint 原生窗口，软件渲染，不使用 WebView、Node.js 或内置
 
 在项目根目录用 PowerShell 7 执行 `./desktop.ps1`，或直接运行发布 EXE。Rust 客户端按已保存设置在后台启动 LocalVoice 服务；重复运行 PowerShell 入口不会重复启动已运行的客户端。
 
-修改源码后执行 `./desktop.ps1 build`。构建使用项目内清华 Cargo 镜像，依赖版本由 Cargo.lock 固定。发布程序在 `desktop/target/release/local-voice-desktop.exe`。
+普通安装使用 [install.md](../install.md) 中的预编译 Release，程序位于 `.runtime/desktop/local-voice-desktop.exe`。只有修改源码的开发者才需要 Rust MSVC 与 Visual Studio C++ 组件：在 `desktop` 目录执行 `cargo build --release --locked`，然后显式运行 `desktop/target/release/local-voice-desktop.exe`。`desktop.ps1` 始终启动下载的 Release。依赖版本由 Cargo.lock 固定。
 
 ## 操作
 
@@ -41,7 +41,7 @@ TTS 将选区或剪贴板文本作为一次连续朗读（最多 20000 字）。
 
 播放当前音频时提前合成下一份音频，共用一个播放队列，最多缓存当前音频和一份后续音频。不会等待播完才发起下一次合成，也不会将整篇音频全部缓存。若模型生成慢于播放，仍可能暂时缺少后续音频。取消信号由音频线程独立检查，后续 HTTP 请求等待期间也能停止播放；已经开始的服务端推理可能继续到结束。
 
-不保存录音和转写历史；待复制文字仅在当前进程内。设置写入 `%LOCALAPPDATA%/LocalVoice/settings.json`。模型与 Python 环境不由客户端修改（原生识别环境用 `scripts/setup-native-asr.ps1` 安装）。退出客户端会结束本机识别进程；WSL 中的 TTS 需释放时用设置里的停止或根目录 `voice.ps1 stop`。
+不保存录音和转写历史；待复制文字仅在当前进程内。设置写入 `.runtime/settings.json`。模型与 Python 环境不由客户端修改（原生识别环境用 `scripts/setup-native-asr.ps1` 安装）。退出客户端会结束本机识别进程；WSL 中的 TTS 需释放时用设置里的停止或根目录 `voice.ps1 stop`。
 
 选区仅在主动朗读时读取。标准 EDIT 兼容路径需要临时读取控件开头到选区末尾的文本，再截取选区；读取量有上限，不保存或发送选区外的内容，不改写剪贴板。
 
@@ -53,13 +53,15 @@ TTS 将选区或剪贴板文本作为一次连续朗读（最多 20000 字）。
 
 设置窗口明确激活并显示在前台，麦克风和音色列表在后台加载。Slint 1.17 的 winit 层跨窗口共用鼠标位置，重返相同坐标时可能漏掉移动事件；客户端给悬浮窗和设置窗分别保存坐标并派发点击，避免重复点击失效。真实鼠标三轮打开/关闭验证见 `outputs/desktop/settings-after.json`。
 
-耗时诊断在 `%LOCALAPPDATA%/LocalVoice/timings.jsonl`，约 512 KiB 后清空续写，只记录录音停止、驱动关闭、队列、WAV 编码、HTTP/服务端识别、目标检查和输入等阶段的时间、采样率及音频长度，不保存录音、转写文本或应用名称。用于区分等待发生在客户端、服务端还是输入目标。
+耗时诊断在 `.runtime/timings.jsonl`，约 512 KiB 后清空续写，只记录录音停止、驱动关闭、队列、WAV 编码、HTTP/服务端识别、目标检查和输入等阶段的时间、采样率及音频长度，不保存录音、转写文本或应用名称。用于区分等待发生在客户端、服务端还是输入目标。
 
 2026-09-06 在本机发布版、窗口显示且未录音/播放时测量：程序文件 13.70 MiB，工作集 31.24 MiB，私有提交内存 8.95 MiB。10 秒采样平均占用一个逻辑处理器的 2.19%，折合本机 16 逻辑处理器总量约 0.14%。这是宿主客户端开销，不包含 WSL 模型服务，也不是录音/播放时的峰值。完整数据见 `outputs/desktop/window-check.json`。
 
 2026-09-06 已将默认朗读换为 Melo 中文 / 中英混读音色；CPU 推理，模型显存为 0。试听与资源见 [Melo 部署记录](../docs/melo-and-service-control.md)。此前的 Kokoro 测试数据仅作历史对照。
 
 ## 开发验证
+
+维护者发布：提交修改后，在仓库根目录运行 `cargo build --manifest-path desktop/Cargo.toml --release --locked`，再运行 `./.venv/Scripts/python.exe scripts/package-desktop.py`。产物位于 `outputs/release/v<版本>`，包含 EXE、构建提交与第三方许可。将 ZIP 和 `SHA256SUMS` 上传到同名 `v<版本>` GitHub Release，并在下载页面保留 README 中的 Made with Slint 徽章。普通用户不执行这些构建步骤。
 
 `cargo test` 验证手动录音、长音频请求、PCM、文本完整性、朗读预取/缓存上限/取消和快捷键解析。
 

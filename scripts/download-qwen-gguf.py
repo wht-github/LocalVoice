@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import time
 import urllib.request
@@ -22,7 +23,8 @@ def download(item):
     target = DEST / name
     if not target.exists():
         partial = target.with_suffix('.partial')
-        url = f'https://huggingface.co/{REPO}/resolve/{REVISION}/{name}?download=true&nocache={time.time_ns()}'
+        endpoint = os.environ.get('HF_ENDPOINT', 'https://huggingface.co').rstrip('/')
+        url = f'{endpoint}/{REPO}/resolve/{REVISION}/{name}?download=true&nocache={time.time_ns()}'
         print(f'Downloading {name} ({size / 1e9:.2f} GB)', flush=True)
         with urllib.request.urlopen(url, timeout=60) as response, partial.open('wb') as output:
             received = 0

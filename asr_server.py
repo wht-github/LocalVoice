@@ -5,6 +5,17 @@ import re
 import threading
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+# Set caches before importing model/JIT libraries. Every clone owns its runtime.
+CACHE = Path(__file__).resolve().parent / ".runtime/cache"
+os.environ["HF_HOME"] = str(CACHE / "huggingface")
+os.environ["HF_HUB_CACHE"] = str(CACHE / "huggingface/hub")
+os.environ["MODELSCOPE_CACHE"] = str(CACHE / "modelscope")
+os.environ["NUMBA_CACHE_DIR"] = str(CACHE / "numba")
+os.environ["TORCH_HOME"] = str(CACHE / "torch")
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 import numpy as np
 import soundfile as sf
@@ -16,6 +27,7 @@ LLAMA = BACKEND in {"qwen-llama-0.6b", "qwen-llama-1.7b"}
 if not LLAMA and BACKEND != "sensevoice-cpu":
     raise ValueError("Unknown ASR_BACKEND")
 MODEL_ID = "FunAudioLLM/SenseVoiceSmall"
+SENSEVOICE_REVISION = "3847d57b6bdf2dd8875cb1508d2af43d80a16bf7"
 if LLAMA:
     from llama_asr import SIZES
     MODEL_ID = f"Qwen3-ASR-{SIZES[BACKEND]}-Q8_0"
@@ -49,9 +61,9 @@ async def lifespan(app):
     path = os.environ.get("ASR_MODEL")
     if not path:
         try:
-            path = snapshot_download(MODEL_ID, local_files_only=True)
+            path = snapshot_download(MODEL_ID, revision=SENSEVOICE_REVISION, local_files_only=True)
         except LocalEntryNotFoundError:
-            path = MODEL_ID  # First install can still download the model.
+            path = snapshot_download(MODEL_ID, revision=SENSEVOICE_REVISION)
     model = AutoModel(
         model=path, hub="hf", device="cpu", ncpu=4,
         disable_update=True, trust_remote_code=False,
