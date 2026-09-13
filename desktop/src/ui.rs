@@ -86,6 +86,11 @@ fn show_settings(window: &slint::Window) -> Result<()> {
 }
 
 fn repaint_complete(window: &slint::Window) {
+    mark_complete(window);
+    window.request_redraw();
+}
+
+pub(crate) fn mark_complete(window: &slint::Window) {
     // softbuffer's Windows backing store can be lost across hide/show while its
     // buffer age still says "reused". request_redraw alone only paints dirty items.
     let size = window.size().to_logical(window.scale_factor());
@@ -97,7 +102,51 @@ fn repaint_complete(window: &slint::Window) {
         .window_adapter()
         .renderer()
         .mark_dirty_region(dirty);
-    window.request_redraw();
+}
+
+#[derive(Default)]
+pub(crate) struct DisplayState {
+    hwnd: isize,
+    geometry: Option<(slint::PhysicalSize, f32, u64)>,
+    changed: bool,
+}
+
+impl DisplayState {
+    pub(crate) fn event(&mut self, window: &slint::Window, event: &winit::event::WindowEvent) {
+        use winit::event::WindowEvent;
+        window.with_winit_window(|w| {
+            if let Ok(handle) = w.window_handle() {
+                if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                    if self.hwnd != h.hwnd.get() {
+                        self.hwnd = h.hwnd.get();
+                        native::watch_display(HWND(self.hwnd as *mut _));
+                        self.changed = true;
+                    }
+                }
+            }
+        });
+        match event {
+            WindowEvent::ScaleFactorChanged { .. }
+            | WindowEvent::Resized(_)
+            | WindowEvent::Occluded(false) => self.changed = true,
+            WindowEvent::RedrawRequested => {
+                // Resize/DPI callbacks precede Slint's own handling. Invalidate
+                // here, after the new size/scale is installed, before rendering.
+                let geometry = (
+                    window.size(),
+                    window.scale_factor(),
+                    native::display_revision(),
+                );
+                if self.changed || self.geometry != Some(geometry) {
+                    self.changed = false;
+                    self.geometry = Some(geometry);
+                    native::keep_in_work_area(HWND(self.hwnd as *mut _));
+                    mark_complete(window);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 pub fn run() -> Result<()> {
@@ -117,9 +166,13 @@ pub fn run() -> Result<()> {
     ui.set_tts_enabled(config.tts_enabled);
     let settings = SettingsWindow::new()?;
     let mut settings_pointer = PointerState::default();
+    let mut settings_display = DisplayState::default();
     settings
         .window()
-        .on_winit_window_event(move |window, event| settings_pointer.event(window, event));
+        .on_winit_window_event(move |window, event| {
+            settings_display.event(window, event);
+            settings_pointer.event(window, event)
+        });
     let shared = Arc::new(Mutex::new(config.clone()));
     let (tx, rx) = mpsc::channel();
     {
@@ -446,7 +499,9 @@ pub fn run() -> Result<()> {
     }
     let initialized = Rc::new(RefCell::new(None));
     let mut pointer = PointerState::default();
+    let mut display = DisplayState::default();
     ui.window().on_winit_window_event(move |window, event| {
+        display.event(window, event);
         window.with_winit_window(|w| {
             if let Ok(handle) = w.window_handle() {
                 if let RawWindowHandle::Win32(h) = handle.as_raw() {

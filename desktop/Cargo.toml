@@ -9,7 +9,7 @@ anyhow = "1"
 png = "0.18"
 slint = { version = "=1.17.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "compat-1-2", "unstable-winit-030", "raw-window-handle-06"] }
 i-slint-backend-winit = { version = "=1.17.1", default-features = false, features = ["renderer-software"] }
-# Pinned with Slint: invalidate the full software surface when restoring a window.
+# Pinned with Slint: invalidate the software surface after restore/display changes.
 i-slint-core = { version = "=1.17.1", default-features = false }
 raw-window-handle = "0.6"
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_System_LibraryLoader"] }

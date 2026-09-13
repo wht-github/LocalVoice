@@ -49,6 +49,8 @@ TTS 将选区或剪贴板文本作为一次连续朗读（最多 20000 字）。
 
 隐藏恢复时显式标记整个软件渲染表面重绘，避免 Windows 清空缓冲区后仍只绘制鼠标经过的局部区域。录音结束先提交尾段，再等待 WASAPI 驱动退出。UI Automation 的连接与事务超时分别设为 300 ms；这不是所有辅助功能操作的总耗时保证，多个调用仍可能累计等待。
 
+分辨率、DPI 或窗口尺寸变化后，在框架完成尺寸更新后的首次绘制中重画完整表面；窗口越出新屏幕工作区时移回可见区域。悬浮窗和设置窗口共用此处理，不添加持续重绘定时器。
+
 设置窗口明确激活并显示在前台，麦克风和音色列表在后台加载。Slint 1.17 的 winit 层跨窗口共用鼠标位置，重返相同坐标时可能漏掉移动事件；客户端给悬浮窗和设置窗分别保存坐标并派发点击，避免重复点击失效。真实鼠标三轮打开/关闭验证见 `outputs/desktop/settings-after.json`。
 
 耗时诊断在 `%LOCALAPPDATA%/LocalVoice/timings.jsonl`，约 512 KiB 后清空续写，只记录录音停止、驱动关闭、队列、WAV 编码、HTTP/服务端识别、目标检查和输入等阶段的时间、采样率及音频长度，不保存录音、转写文本或应用名称。用于区分等待发生在客户端、服务端还是输入目标。
@@ -73,6 +75,7 @@ TTS 将选区或剪贴板文本作为一次连续朗读（最多 20000 字）。
 - `--asr-models-check <wav-path> <report-path>`：关闭日常客户端后验证 SenseVoice CPU → Qwen 0.6B → Qwen 1.7B → CPU 的实际切换、转写与停止，不启动朗读、不录音、不输入文字。
 - `--snapshot <png-path>`：通过 Slint 自身渲染器导出本程序悬浮窗和设置窗口，然后退出；不抓取其他应用屏幕。
 - `--restore-check <directory>`：连续隐藏/恢复三次，用本进程窗口的实际表面比较像素，不调用会补绘的 Slint 截图，也不移动鼠标。`--unpatched` 只用于对照旧显示路径。
+- `--display-check <directory>`：只向测试进程自己的两个窗口发送 100%／150%／200% DPI 和显示变化消息，分别模拟表面丢失、窗口越界；对比实际表面与完整重绘结果。不会修改系统分辨率、启动模型、录音或输入文字。`--unpatched` 关闭本轮修复，用于对照。测试 200% 设置窗口时，当前屏幕工作区须能容纳该窗口。
 - `--asr-latency-check <24k-mono-wav> <report-path>`：用已知音频测量 24/48 kHz、短/长上传路径，不录音。
 - `--focus-check <foreground-pid> <report-path>`：只读检查指定前台窗口的编辑器属性，不读取输入内容。
 - `--target-click-check <foreground-pid> <report-path>`、`--selection-click-check <foreground-pid> <expected-text> <report-path>`：点击真实悬浮按钮的诊断模式，禁用录音和播放。脚本 `scripts/check-target-click.ps1` 只点击诊断窗口；可选择已知测试文本做选区验证。

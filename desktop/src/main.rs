@@ -631,6 +631,11 @@ fn controller(
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("--display-check") => verification::display_check(
+            args.get(2)
+                .ok_or_else(|| anyhow::anyhow!("report directory required"))?,
+            args.iter().any(|arg| arg == "--unpatched"),
+        ),
         Some("--asr-models-check") => verification::asr_models_check(
             args.get(2)
                 .ok_or_else(|| anyhow::anyhow!("input WAV required"))?,

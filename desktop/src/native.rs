@@ -503,6 +503,87 @@ unsafe extern "system" fn no_activate(
     }
     unsafe { DefSubclassProc(window, msg, w, l) }
 }
+
+static DISPLAY_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn display_revision() -> u64 {
+    DISPLAY_REVISION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+unsafe extern "system" fn display_events(
+    window: HWND,
+    msg: u32,
+    w: WPARAM,
+    l: LPARAM,
+    _id: usize,
+    _data: usize,
+) -> LRESULT {
+    if msg == WM_DISPLAYCHANGE {
+        // Winit does not expose WM_DISPLAYCHANGE. A resolution change can lose
+        // the backing surface even when this window's pixel size stays the same.
+        DISPLAY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        unsafe {
+            let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(window), None, false);
+        }
+    }
+    unsafe { DefSubclassProc(window, msg, w, l) }
+}
+
+pub fn watch_display(window: HWND) {
+    unsafe {
+        let _ = SetWindowSubclass(window, Some(display_events), 2, 0);
+    }
+}
+
+fn visible_origin(x: i32, y: i32, width: i32, height: i32, work: RECT) -> (i32, i32) {
+    (
+        x.clamp(work.left, (work.right - width).max(work.left)),
+        y.clamp(work.top, (work.bottom - height).max(work.top)),
+    )
+}
+
+pub fn keep_in_work_area(window: HWND) {
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    };
+    unsafe {
+        if IsIconic(window).as_bool() {
+            return;
+        }
+        let mut rect = RECT::default();
+        let mut monitor = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetWindowRect(window, &mut rect).is_err()
+            || !GetMonitorInfoW(
+                MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST),
+                &mut monitor,
+            )
+            .as_bool()
+        {
+            return;
+        }
+        let (x, y) = visible_origin(
+            rect.left,
+            rect.top,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            monitor.rcWork,
+        );
+        if (x, y) != (rect.left, rect.top) {
+            let _ = SetWindowPos(
+                window,
+                None,
+                x,
+                y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
+}
 pub fn floating(window: HWND) {
     unsafe {
         let old = GetWindowLongPtrW(window, GWL_EXSTYLE);
@@ -550,6 +631,28 @@ pub fn activate_settings(window: HWND) {
 #[cfg(test)]
 mod tests {
     use super::EditorEvidence;
+    #[test]
+    fn display_changes_keep_windows_in_the_available_work_area() {
+        let work = super::RECT {
+            left: -1920,
+            top: 0,
+            right: 0,
+            bottom: 1040,
+        };
+        assert_eq!(
+            super::visible_origin(-1000, 100, 380, 102, work),
+            (-1000, 100)
+        );
+        assert_eq!(
+            super::visible_origin(-20, 1000, 380, 102, work),
+            (-380, 938)
+        );
+        // An oversized window must keep its title/top-left accessible, not panic.
+        assert_eq!(
+            super::visible_origin(100, 100, 2000, 1200, work),
+            (-1920, 0)
+        );
+    }
     #[test]
     fn focused_terminal_and_document_editors_are_supported() {
         let mut editor = EditorEvidence {

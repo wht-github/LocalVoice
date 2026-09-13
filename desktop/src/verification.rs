@@ -509,6 +509,156 @@ pub fn restore_check(
     });
 }
 
+/// Send display messages only to our own fixture windows. Never changes the
+/// desktop's resolution/DPI, starts models, records audio, or types into apps.
+pub fn display_check(directory: &str, unpatched: bool) -> Result<()> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use slint::{ComponentHandle, winit_030::WinitWindowAccessor};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    use windows::Win32::Graphics::Gdi::*;
+    let backend = i_slint_backend_winit::Backend::builder()
+        .with_renderer_name("software")
+        .with_window_attributes_hook(|attributes| {
+            use slint::winit_030::winit::platform::windows::WindowAttributesExtWindows;
+            attributes.with_active(false).with_skip_taskbar(true)
+        })
+        .build()?;
+    slint::platform::set_platform(Box::new(backend))?;
+    let ui = crate::VoiceWindow::new()?;
+    ui.set_status("显示变更测试".into());
+    let settings = crate::SettingsWindow::new()?;
+    for window in [ui.window(), settings.window()] {
+        let mut state = crate::ui::DisplayState::default();
+        window.on_winit_window_event(move |window, event| {
+            if !unpatched {
+                state.event(window, event);
+            }
+            i_slint_backend_winit::EventResult::Propagate
+        });
+    }
+    ui.show()?;
+    let original_dpi = (ui.window().scale_factor() * 96.).round() as u32;
+    let cases = [false, true]
+        .into_iter()
+        .flat_map(|settings| {
+            [
+                (Some(96), false),
+                (Some(144), false),
+                (Some(192), false),
+                (Some(original_dpi), false),
+                (None, false),
+                (None, true),
+            ]
+            .map(|(dpi, offscreen)| (settings, dpi, offscreen))
+        })
+        .collect::<Vec<_>>();
+    let output = std::path::PathBuf::from(directory);
+    std::fs::create_dir_all(&output)?;
+    let weak_ui = ui.as_weak();
+    let weak_settings = settings.as_weak();
+    let step = Cell::new(0usize);
+    let before = RefCell::new(Vec::new());
+    let reports = RefCell::new(Vec::new());
+    let failure = Rc::new(RefCell::new(None));
+    let error = failure.clone();
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, Duration::from_millis(450), move || {
+        let result = (|| -> Result<()> {
+            let ui = weak_ui.upgrade().context("Window closed")?;
+            let settings = weak_settings.upgrade().context("Settings closed")?;
+            let index = step.get() / 4;
+            let phase = step.get() % 4;
+            let (is_settings, dpi, offscreen) = cases[index];
+            let window = if is_settings { settings.window() } else { ui.window() };
+            let mut hwnd = HWND::default();
+            if phase == 0 {
+                ui.hide()?;
+                settings.hide()?;
+                window.show()?;
+            }
+            window.with_winit_window(|w| {
+                if let Ok(handle) = w.window_handle() {
+                    if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                        hwnd = HWND(h.hwnd.get() as *mut _);
+                    }
+                }
+            });
+            match phase {
+                0 => unsafe {
+                    SetWindowPos(hwnd, Some(HWND_TOPMOST), 80, 80, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE)?;
+                    if let Some(dpi) = dpi {
+                        let mut rect = RECT::default();
+                        GetWindowRect(hwnd, &mut rect)?;
+                        SendMessageW(hwnd, WM_DPICHANGED, Some(WPARAM((dpi | dpi << 16) as usize)), Some(LPARAM(&rect as *const _ as isize)));
+                    }
+                },
+                1 if dpi.is_none() => unsafe {
+                    // Independently model surface loss and off-screen placement
+                    // during a display reset, without touching global settings.
+                    let mut monitor = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+                    ensure!(GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor).as_bool());
+                    if offscreen {
+                        SetWindowPos(hwnd, None, monitor.rcWork.right - 20, monitor.rcWork.bottom - 20, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)?;
+                    } else {
+                    let dc = GetDC(Some(hwnd));
+                    let mut rect = RECT::default();
+                    GetClientRect(hwnd, &mut rect)?;
+                    FillRect(dc, &rect, HBRUSH(GetStockObject(BLACK_BRUSH).0));
+                    ReleaseDC(Some(hwnd), dc);
+                    }
+                    SendMessageW(hwnd, WM_DISPLAYCHANGE, Some(WPARAM(32)), Some(LPARAM(0)));
+                },
+                2 => {
+                    *before.borrow_mut() = surface(window, &output.join(format!("{index}-actual.png")))?;
+                    crate::ui::mark_complete(window);
+                    window.request_redraw();
+                }
+                3 => {
+                    let reference = surface(window, &output.join(format!("{index}-full.png")))?;
+                    let different = before.borrow().iter().zip(&reference).filter(|(a,b)| a != b).count();
+                    let mut rect = RECT::default();
+                    let mut client = RECT::default();
+                    let mut monitor = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+                    unsafe {
+                        GetWindowRect(hwnd, &mut rect)?;
+                        GetClientRect(hwnd, &mut client)?;
+                        ensure!(GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor).as_bool());
+                    }
+                    let scale = window.scale_factor();
+                    let expected = if is_settings { (450.,640.) } else { (380.,102.) };
+                    let size_ok = client.right == (expected.0 * scale).round() as i32 && client.bottom == (expected.1 * scale).round() as i32;
+                    let visible = rect.left >= monitor.rcWork.left && rect.top >= monitor.rcWork.top && rect.right <= monitor.rcWork.right && rect.bottom <= monitor.rcWork.bottom;
+                    reports.borrow_mut().push(serde_json::json!({"settings":is_settings,"dpi":dpi,"offscreen":offscreen,"scale":scale,
+                        "physical_size":[client.right,client.bottom],"size_ok":size_ok,"visible":visible,
+                        "different_bytes":different,"same_buffer_size":before.borrow().len()==reference.len()}));
+                    if index + 1 == cases.len() {
+                        std::fs::write(output.join("result.json"), serde_json::to_vec_pretty(&serde_json::json!({"unpatched":unpatched,"cases":*reports.borrow(),"note":"Synthetic DPI/display messages to own windows; no global resolution changes. Actual GDI surface compared with an explicit full repaint."}))?)?;
+                        if !unpatched {
+                            ensure!(reports.borrow().iter().all(|row| row["different_bytes"] == 0
+                                && row["same_buffer_size"] == true && row["size_ok"] == true
+                                && row["visible"] == true), "Display recovery regression; see result.json");
+                        }
+                        slint::quit_event_loop()?;
+                    }
+                }
+                _ => {}
+            }
+            step.set(step.get()+1);
+            Ok(())
+        })();
+        if let Err(e) = result {
+            *error.borrow_mut() = Some(format!("{e:#}"));
+            let _ = slint::quit_event_loop();
+        }
+    });
+    slint::run_event_loop_until_quit()?;
+    if let Some(error) = failure.borrow_mut().take() {
+        bail!(error);
+    }
+    Ok(())
+}
+
 /// Exercise the same manager and HTTP path as settings Save without changing
 /// settings or sending recognized text to another application.
 pub fn asr_models_check(audio: &str, output: &str) -> Result<()> {
