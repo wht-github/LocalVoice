@@ -23,6 +23,8 @@ try {
 }
 Invoke-ClientCheck @('--service-check', (Join-Path $reportRoot 'service-check.json')) 'service' 45000
 Invoke-ClientCheck @('--snapshot', (Join-Path $reportRoot 'window.png')) 'snapshot' 15000
+Invoke-ClientCheck @('--floating-check', (Join-Path $reportRoot 'floating-regression')) 'floating' 30000
+Invoke-ClientCheck @('--interaction-check', (Join-Path $reportRoot 'interaction-regression')) 'interaction' 30000
 $restoreRoot = Join-Path $reportRoot 'restore-regression'
 Invoke-ClientCheck @('--restore-check', $restoreRoot) 'restore' 15000
 $restore = Get-Content -LiteralPath (Join-Path $restoreRoot 'result.json') -Raw | ConvertFrom-Json

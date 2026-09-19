@@ -2,12 +2,117 @@ use super::*;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::winit_030::{WinitWindowAccessor, winit};
 use slint::{ModelRc, SharedString, Timer, TimerMode, VecModel};
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 use tray_icon::{
     Icon, TrayIconBuilder, TrayIconEvent,
     menu::{Menu, MenuEvent, MenuItem},
 };
 use windows::Win32::Foundation::HWND;
+
+pub(crate) const RENDERER: &str = "femtovg";
+
+// The ball is the stable desktop entry. The panel borrows its position and
+// returns there when dismissed, even if expanding near an edge was clamped.
+pub(crate) struct Presentation {
+    ui: slint::Weak<VoiceWindow>,
+    anchor: Cell<Option<slint::PhysicalPosition>>,
+    inside: Cell<bool>,
+    collapse_timer: Timer,
+}
+
+impl Presentation {
+    pub(crate) fn new(ui: &VoiceWindow) -> Rc<Self> {
+        Rc::new(Self {
+            ui: ui.as_weak(),
+            anchor: Cell::new(None),
+            inside: Cell::new(false),
+            collapse_timer: Timer::default(),
+        })
+    }
+
+    pub(crate) fn show_ball(&self) -> Result<()> {
+        self.collapse_timer.stop();
+        let Some(ui) = self.ui.upgrade() else {
+            return Ok(());
+        };
+        let restore = !ui.get_compact();
+        set_compact(&ui, true);
+        ui.window().set_size(slint::LogicalSize::new(64., 64.));
+        if restore {
+            if let Some(position) = self.anchor.take() {
+                ui.window().set_position(position);
+            }
+        }
+        ui.set_animation_enabled(true);
+        show_complete(ui.window())
+    }
+
+    pub(crate) fn show_panel(&self) -> Result<()> {
+        self.collapse_timer.stop();
+        self.inside.set(true);
+        let Some(ui) = self.ui.upgrade() else {
+            return Ok(());
+        };
+        if ui.get_compact() {
+            let position = ui.window().position();
+            self.anchor.set(Some(position));
+            set_compact(&ui, false);
+            ui.window().set_size(slint::LogicalSize::new(
+                380.,
+                if ui.get_has_pending() { 138. } else { 102. },
+            ));
+            ui.window().set_position(slint::PhysicalPosition::new(
+                position.x - (316. * ui.window().scale_factor()).round() as i32,
+                position.y,
+            ));
+        }
+        show_panel(&ui)
+    }
+
+    pub(crate) fn hide(&self) -> Result<()> {
+        self.collapse_timer.stop();
+        if let Some(ui) = self.ui.upgrade() {
+            ui.set_animation_enabled(false);
+            ui.hide()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn event(self: &Rc<Self>, event: &winit::event::WindowEvent) {
+        use winit::event::WindowEvent;
+        match event {
+            WindowEvent::CursorEntered { .. } => {
+                self.inside.set(true);
+                self.collapse_timer.stop();
+            }
+            WindowEvent::CursorLeft { .. } => {
+                self.inside.set(false);
+                let Some(ui) = self.ui.upgrade() else { return };
+                if ui.get_compact() || !ui.window().is_visible() {
+                    return;
+                }
+                let weak = Rc::downgrade(self);
+                self.collapse_timer.start(
+                    TimerMode::Repeated,
+                    Duration::from_millis(1200),
+                    move || {
+                        let Some(this) = weak.upgrade() else { return };
+                        let Some(ui) = this.ui.upgrade() else { return };
+                        if this.inside.get() || ui.get_compact() || !ui.window().is_visible() {
+                            this.collapse_timer.stop();
+                        } else if !ui.get_has_pending() && !native::pointer_button_down() {
+                            let _ = this.show_ball();
+                        }
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+}
 
 #[derive(Default)]
 struct PointerState {
@@ -66,6 +171,13 @@ impl PointerState {
 
 pub(crate) fn show_complete(window: &slint::Window) -> Result<()> {
     window.show()?;
+    window.with_winit_window(|w| {
+        if let Ok(handle) = w.window_handle() {
+            if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                native::restore_visible(HWND(h.hwnd.get() as *mut _));
+            }
+        }
+    });
     repaint_complete(window);
     Ok(())
 }
@@ -117,9 +229,9 @@ impl DisplayState {
         window.with_winit_window(|w| {
             if let Ok(handle) = w.window_handle() {
                 if let RawWindowHandle::Win32(h) = handle.as_raw() {
-                    if self.hwnd != h.hwnd.get() {
+                    let installed = native::watch_display(HWND(h.hwnd.get() as *mut _));
+                    if self.hwnd != h.hwnd.get() || installed {
                         self.hwnd = h.hwnd.get();
-                        native::watch_display(HWND(self.hwnd as *mut _));
                         self.changed = true;
                     }
                 }
@@ -128,7 +240,10 @@ impl DisplayState {
         match event {
             WindowEvent::ScaleFactorChanged { .. }
             | WindowEvent::Resized(_)
-            | WindowEvent::Occluded(false) => self.changed = true,
+            | WindowEvent::Occluded(false) => {
+                self.changed = true;
+                window.request_redraw();
+            }
             WindowEvent::RedrawRequested => {
                 // Resize/DPI callbacks precede Slint's own handling. Invalidate
                 // here, after the new size/scale is installed, before rendering.
@@ -153,7 +268,7 @@ pub fn run() -> Result<()> {
     let config_result = Config::load();
     let config = config_result.as_ref().cloned().unwrap_or_default();
     let backend = i_slint_backend_winit::Backend::builder()
-        .with_renderer_name("software")
+        .with_renderer_name(RENDERER)
         .with_window_attributes_hook(|attributes| {
             use winit::platform::windows::WindowAttributesExtWindows;
             // Slint supplies a temporary title here. Settings are explicitly
@@ -163,6 +278,7 @@ pub fn run() -> Result<()> {
         .build()?;
     slint::platform::set_platform(Box::new(backend))?;
     let ui = VoiceWindow::new()?;
+    let presentation = Presentation::new(&ui);
     ui.set_tts_enabled(config.tts_enabled);
     let settings = SettingsWindow::new()?;
     let mut settings_pointer = PointerState::default();
@@ -200,11 +316,15 @@ pub fn run() -> Result<()> {
         });
     }
     {
-        let weak = ui.as_weak();
-        ui.on_hide_window(move || {
-            if let Some(ui) = weak.upgrade() {
-                let _ = ui.hide();
-            }
+        let presentation = presentation.clone();
+        ui.on_collapse_window(move || {
+            let _ = presentation.show_ball();
+        });
+    }
+    {
+        let presentation = presentation.clone();
+        ui.on_expand_window(move || {
+            let _ = presentation.show_panel();
         });
     }
     {
@@ -218,11 +338,9 @@ pub fn run() -> Result<()> {
         });
     }
     ui.window().on_close_requested({
-        let weak = ui.as_weak();
+        let presentation = presentation.clone();
         move || {
-            if let Some(ui) = weak.upgrade() {
-                let _ = ui.hide();
-            }
+            let _ = presentation.show_ball();
             slint::CloseRequestResponse::KeepWindowShown
         }
     });
@@ -390,11 +508,16 @@ pub fn run() -> Result<()> {
     });
     {
         let show = open_settings.clone();
+        let presentation = presentation.clone();
         ui.on_settings(move || {
             // Finish dispatching the floating button's mouse release before a
             // second native window changes focus/capture during that dispatch.
             let show = show.clone();
-            Timer::single_shot(Duration::from_millis(1), move || show());
+            let presentation = presentation.clone();
+            Timer::single_shot(Duration::from_millis(1), move || {
+                let _ = presentation.show_ball();
+                show();
+            });
         });
     }
     {
@@ -438,11 +561,11 @@ pub fn run() -> Result<()> {
         });
     }
     let menu = Menu::new();
-    let show = MenuItem::new("显示悬浮窗", true, None);
+    let visibility = MenuItem::new("隐藏桌面入口", true, None);
     let read = MenuItem::new("朗读剪贴板", true, None);
     let setup = MenuItem::new("设置", true, None);
     let quit = MenuItem::new("退出", true, None);
-    menu.append_items(&[&show, &read, &setup, &quit])?;
+    menu.append_items(&[&visibility, &read, &setup, &quit])?;
     let mut rgba = vec![0u8; 32 * 32 * 4];
     for y in 0..32 {
         for x in 0..32 {
@@ -457,7 +580,7 @@ pub fn run() -> Result<()> {
             });
         }
     }
-    let _tray = TrayIconBuilder::new()
+    let tray = TrayIconBuilder::new()
         .with_tooltip("本地语音 · 说话输入 / 选区朗读")
         .with_icon(Icon::from_rgba(rgba, 32, 32)?)
         .with_menu(Box::new(menu))
@@ -467,15 +590,55 @@ pub fn run() -> Result<()> {
     let weak = ui.as_weak();
     let sender = tx.clone();
     let settings_action = open_settings.clone();
+    let tray_presentation = presentation.clone();
+    let mut last_visible = true;
+    let mut last_tooltip = String::new();
     tray_timer.start(TimerMode::Repeated, Duration::from_millis(80), move || {
+        if let Some(ui) = weak.upgrade() {
+            let visible = ui.window().is_visible();
+            if visible != last_visible {
+                visibility.set_text(if visible {
+                    "隐藏桌面入口"
+                } else {
+                    "显示悬浮球"
+                });
+                last_visible = visible;
+            }
+            let tooltip = format!(
+                "本地语音 · {}{}",
+                if ui.get_capturing() {
+                    "正在收音"
+                } else if ui.get_recording() {
+                    "正在打开麦克风"
+                } else {
+                    "未收音"
+                },
+                if ui.get_has_pending() {
+                    " · 有待复制文字"
+                } else {
+                    ""
+                }
+            );
+            if tooltip != last_tooltip {
+                let _ = tray.set_tooltip(Some(&tooltip));
+                last_tooltip = tooltip;
+            }
+        }
         while let Ok(event) = MenuEvent::receiver().try_recv() {
-            if event.id == *show.id() {
+            if event.id == *visibility.id() {
                 if let Some(ui) = weak.upgrade() {
-                    let _ = show_complete(ui.window());
+                    if ui.window().is_visible() {
+                        let _ = tray_presentation.hide();
+                    } else {
+                        let _ = tray_presentation.show_ball();
+                    }
                 }
             } else if event.id == *read.id() {
                 let _ = sender.send(Event::ClipboardRead);
             } else if event.id == *setup.id() {
+                if weak.upgrade().is_some_and(|ui| ui.window().is_visible()) {
+                    let _ = tray_presentation.show_ball();
+                }
                 settings_action();
             } else if event.id == *quit.id() {
                 let _ = sender.send(Event::Quit);
@@ -483,10 +646,18 @@ pub fn run() -> Result<()> {
             }
         }
         while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-            if matches!(event, TrayIconEvent::DoubleClick { .. }) {
-                if let Some(ui) = weak.upgrade() {
-                    let _ = show_complete(ui.window());
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: tray_icon::MouseButton::Left,
+                    button_state: tray_icon::MouseButtonState::Up,
+                    ..
+                } | TrayIconEvent::DoubleClick {
+                    button: tray_icon::MouseButton::Left,
+                    ..
                 }
+            ) {
+                let _ = tray_presentation.show_ball();
             }
         }
     });
@@ -497,40 +668,17 @@ pub fn run() -> Result<()> {
         let sender = tx.clone();
         thread::spawn(move || controller(config, shared, weak, sw, sender, rx));
     }
-    let initialized = Rc::new(RefCell::new(None));
-    let mut pointer = PointerState::default();
-    let mut display = DisplayState::default();
+    let mut floating = FloatingState::default();
+    let weak = ui.as_weak();
+    let events_presentation = presentation.clone();
     ui.window().on_winit_window_event(move |window, event| {
-        display.event(window, event);
-        window.with_winit_window(|w| {
-            if let Ok(handle) = w.window_handle() {
-                if let RawWindowHandle::Win32(h) = handle.as_raw() {
-                    if *initialized.borrow() != Some(h.hwnd.get()) {
-                        let first = initialized.borrow().is_none();
-                        *initialized.borrow_mut() = Some(h.hwnd.get());
-                        native::floating(HWND(h.hwnd.get() as *mut _));
-                        if first {
-                            if let Some(monitor) = w.current_monitor() {
-                                let size = monitor.size();
-                                let pos = monitor.position();
-                                let window_size = w.outer_size();
-                                w.set_outer_position(winit::dpi::PhysicalPosition::new(
-                                    pos.x
-                                        + (size.width as i32 - window_size.width as i32 - 24)
-                                            .max(0),
-                                    pos.y
-                                        + (size.height as i32 - window_size.height as i32 - 110)
-                                            .max(0),
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        pointer.event(window, event)
+        events_presentation.event(event);
+        if let Some(ui) = weak.upgrade() {
+            floating.event(&ui, event);
+        }
+        floating.pointer.event(window, event)
     });
-    show_complete(ui.window())?;
+    presentation.show_ball()?;
     let args: Vec<_> = std::env::args().collect();
     let snapshot_timer = Timer::default();
     let settings_snapshot = Rc::new(Timer::default());
@@ -596,4 +744,79 @@ pub fn run() -> Result<()> {
     // returns, and prevent a queued service Start from racing with shutdown.
     runtime::shutdown();
     Ok(())
+}
+
+pub(crate) fn set_compact(ui: &VoiceWindow, compact: bool) {
+    ui.set_compact(compact);
+    repaint_complete(ui.window());
+}
+
+pub(crate) fn show_panel(ui: &VoiceWindow) -> Result<()> {
+    ui.set_animation_enabled(true);
+    set_compact(ui, false);
+    show_complete(ui.window())?;
+    ui.window().with_winit_window(|w| {
+        if let Ok(handle) = w.window_handle() {
+            if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                native::floating(HWND(h.hwnd.get() as *mut _));
+            }
+        }
+    });
+    Ok(())
+}
+
+#[derive(Default)]
+pub(crate) struct FloatingState {
+    initialized: Option<isize>,
+    shape: Option<(isize, slint::PhysicalSize, bool)>,
+    display: DisplayState,
+    pointer: PointerState,
+}
+
+impl FloatingState {
+    pub(crate) fn event(&mut self, ui: &VoiceWindow, event: &winit::event::WindowEvent) {
+        let window = ui.window();
+        match event {
+            winit::event::WindowEvent::Occluded(hidden) => ui.set_animation_enabled(!hidden),
+            winit::event::WindowEvent::Resized(size) => {
+                ui.set_animation_enabled(size.width > 0 && size.height > 0 && window.is_visible());
+            }
+            _ => {}
+        }
+        self.display.event(window, event);
+        window.with_winit_window(|w| {
+            let Ok(handle) = w.window_handle() else {
+                return;
+            };
+            let RawWindowHandle::Win32(h) = handle.as_raw() else {
+                return;
+            };
+            let hwnd = HWND(h.hwnd.get() as *mut _);
+            if self.initialized != Some(h.hwnd.get()) {
+                let first = self.initialized.is_none();
+                self.initialized = Some(h.hwnd.get());
+                native::floating(hwnd);
+                if first {
+                    if let Some(monitor) = w.current_monitor() {
+                        let size = monitor.size();
+                        let pos = monitor.position();
+                        let window_size = w.outer_size();
+                        w.set_outer_position(winit::dpi::PhysicalPosition::new(
+                            pos.x + (size.width as i32 - window_size.width as i32 - 24).max(0),
+                            pos.y + (size.height as i32 - window_size.height as i32 - 110).max(0),
+                        ));
+                    }
+                }
+            }
+            // Slint has applied the new size/DPI when drawing begins. Update
+            // the native hit region once, so the ball's corners click through.
+            if matches!(event, winit::event::WindowEvent::RedrawRequested) {
+                let shape = (h.hwnd.get(), window.size(), ui.get_compact());
+                if self.shape != Some(shape) {
+                    self.shape = Some(shape);
+                    native::set_compact_shape(hwnd, ui.get_compact());
+                }
+            }
+        });
+    }
 }

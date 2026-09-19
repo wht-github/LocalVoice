@@ -1,14 +1,14 @@
 [package]
 name = "local-voice-desktop"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 publish = false
 
 [dependencies]
 anyhow = "1"
 png = "0.18"
-slint = { version = "=1.17.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "compat-1-2", "unstable-winit-030", "raw-window-handle-06"] }
-i-slint-backend-winit = { version = "=1.17.1", default-features = false, features = ["renderer-software"] }
+slint = { version = "=1.17.1", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "renderer-software", "compat-1-2", "unstable-winit-030", "raw-window-handle-06"] }
+i-slint-backend-winit = { version = "=1.17.1", default-features = false, features = ["renderer-femtovg", "renderer-software"] }
 # Pinned with Slint: invalidate the software surface after restore/display changes.
 i-slint-core = { version = "=1.17.1", default-features = false }
 raw-window-handle = "0.6"

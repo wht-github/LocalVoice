@@ -5,7 +5,7 @@ use windows::Win32::{
     UI::{
         Accessibility::*,
         Input::KeyboardAndMouse::*,
-        Shell::{DefSubclassProc, SetWindowSubclass},
+        Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
         WindowsAndMessaging::*,
     },
 };
@@ -13,6 +13,12 @@ use windows::core::Interface;
 
 pub struct Automation {
     api: IUIAutomation,
+}
+
+pub(crate) fn pointer_button_down() -> bool {
+    [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON]
+        .iter()
+        .any(|key| unsafe { GetAsyncKeyState(key.0 as i32) < 0 })
 }
 pub struct Target {
     window: HWND,
@@ -495,16 +501,34 @@ unsafe extern "system" fn no_activate(
     msg: u32,
     w: WPARAM,
     l: LPARAM,
-    _id: usize,
+    id: usize,
     _data: usize,
 ) -> LRESULT {
     if msg == WM_MOUSEACTIVATE {
         return LRESULT(MA_NOACTIVATE as isize);
     }
+    // Winit keeps WS_CAPTION on borderless top-level windows for native window
+    // management. Never let Windows draw or hit-test that invisible caption:
+    // otherwise hover/activation can paint a rectangular title inside the orb.
+    if msg == WM_NCPAINT {
+        return LRESULT(0);
+    }
+    if msg == WM_NCACTIVATE {
+        return unsafe { DefSubclassProc(window, msg, w, LPARAM(-1)) };
+    }
+    if msg == WM_NCHITTEST {
+        return LRESULT(HTCLIENT as isize);
+    }
+    if msg == WM_NCDESTROY {
+        unsafe {
+            let _ = RemoveWindowSubclass(window, Some(no_activate), id);
+        }
+    }
     unsafe { DefSubclassProc(window, msg, w, l) }
 }
 
 static DISPLAY_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const DISPLAY_WATCH: windows::core::PCWSTR = windows::core::w!("LocalVoice.DisplayWatch");
 
 pub fn display_revision() -> u64 {
     DISPLAY_REVISION.load(std::sync::atomic::Ordering::Relaxed)
@@ -515,23 +539,54 @@ unsafe extern "system" fn display_events(
     msg: u32,
     w: WPARAM,
     l: LPARAM,
-    _id: usize,
+    id: usize,
     _data: usize,
 ) -> LRESULT {
-    if msg == WM_DISPLAYCHANGE {
-        // Winit does not expose WM_DISPLAYCHANGE. A resolution change can lose
-        // the backing surface even when this window's pixel size stays the same.
+    let resumed = msg == WM_POWERBROADCAST
+        && matches!(w.0 as u32, PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND);
+    if matches!(msg, WM_DISPLAYCHANGE | WM_SETTINGCHANGE) || resumed {
+        // Winit does not expose display/resume broadcasts. The backing surface
+        // can be lost even when the window's pixel size and DPI stay unchanged.
         DISPLAY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        keep_in_work_area(window);
         unsafe {
             let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(window), None, false);
+        }
+    }
+    if msg == WM_NCDESTROY {
+        unsafe {
+            let _ = RemoveWindowSubclass(window, Some(display_events), id);
+            let _ = RemovePropW(window, DISPLAY_WATCH);
         }
     }
     unsafe { DefSubclassProc(window, msg, w, l) }
 }
 
-pub fn watch_display(window: HWND) {
+/// Returns true when a watcher was installed on a newly created native window.
+pub fn watch_display(window: HWND) -> bool {
     unsafe {
-        let _ = SetWindowSubclass(window, Some(display_events), 2, 0);
+        // A property belongs to the native window, not its reusable HWND value.
+        // Avoid GetWindowSubclass, which requires a Common Controls v6 manifest.
+        if !GetPropW(window, DISPLAY_WATCH).is_invalid() {
+            return false;
+        }
+        let installed = SetWindowSubclass(window, Some(display_events), 2, 0).as_bool();
+        if installed {
+            let _ = SetPropW(window, DISPLAY_WATCH, Some(HANDLE(1usize as *mut _)));
+        }
+        installed
+    }
+}
+
+pub fn restore_visible(window: HWND) {
+    watch_display(window);
+    unsafe {
+        // Slint show() can be a no-op while Windows considers the window hidden
+        // or minimized. Restore its native state without stealing the input focus.
+        let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
+        keep_in_work_area(window);
+        // Also wake native painting if a redraw was pending before suspend.
+        let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(window), None, false);
     }
 }
 
@@ -605,6 +660,25 @@ pub fn floating(window: HWND) {
     }
 }
 
+pub fn set_compact_shape(window: HWND, compact: bool) {
+    use windows::Win32::Graphics::Gdi::{CreateEllipticRgn, DeleteObject, SetWindowRgn};
+    unsafe {
+        if !compact {
+            SetWindowRgn(window, None, true);
+            return;
+        }
+        let mut rect = RECT::default();
+        if GetWindowRect(window, &mut rect).is_err() {
+            return;
+        }
+        let region = CreateEllipticRgn(0, 0, rect.right - rect.left, rect.bottom - rect.top);
+        if !region.is_invalid() && SetWindowRgn(window, Some(region), true) == 0 {
+            // A successful SetWindowRgn transfers ownership to Windows.
+            let _ = DeleteObject(region.into());
+        }
+    }
+}
+
 pub fn activate_settings(window: HWND) {
     unsafe {
         let old = GetWindowLongPtrW(window, GWL_EXSTYLE);
@@ -651,6 +725,22 @@ mod tests {
         assert_eq!(
             super::visible_origin(100, 100, 2000, 1200, work),
             (-1920, 0)
+        );
+        let laptop = super::RECT {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+        // A panel left on an unplugged right-hand monitor returns fully on screen.
+        assert_eq!(
+            super::visible_origin(3200, 980, 380, 102, laptop),
+            (1540, 938)
+        );
+        // Compact and expanded windows both stay above the taskbar.
+        assert_eq!(
+            super::visible_origin(1900, 1020, 64, 64, laptop),
+            (1856, 976)
         );
     }
     #[test]

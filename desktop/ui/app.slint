@@ -12,14 +12,17 @@ component Action inherits Rectangle {
 }
 export component VoiceWindow inherits Window {
     title: "Local Voice";
-    width: 380px;
-    height: root.has-pending ? 138px : 102px;
+    width: root.compact ? 64px : 380px;
+    height: root.compact ? 64px : (root.has-pending ? 138px : 102px);
     no-frame: true;
     always-on-top: true;
-    background: #172522;
+    background: root.compact ? transparent : #172522;
     default-font-family: "Microsoft YaHei UI";
     in property <string> status: "正在连接语音服务…";
     in property <bool> recording: false;
+    in property <bool> capturing: false;
+    in property <bool> compact: false;
+    in property <bool> animation-enabled: true;
     in property <bool> speaking: false;
     in property <bool> tts-enabled: true;
     in property <bool> has-pending: false;
@@ -29,9 +32,65 @@ export component VoiceWindow inherits Window {
     callback cancel;
     callback copy;
     callback settings;
-    callback hide-window;
+    callback collapse-window;
+    callback expand-window;
     callback drag;
-    VerticalLayout {
+    if root.compact: Rectangle {
+        background: transparent;
+        accessible-role: button;
+        accessible-label: (root.capturing ? "正在收音" : (root.recording ? "正在打开麦克风" : "未收音"))
+            + (root.has-pending ? "，有待复制文字" : "") + "，单击展开，拖动移动";
+        // Keep the painted edge inside the native hit region: the compositor
+        // blends its alpha coverage instead of cutting the circle into pixels.
+        property <float> pulse: root.animation-enabled && root.recording
+            ? 0.5 + 0.5 * sin(360deg * animation-tick() / 1600ms) : 0;
+        property <float> amplitude: root.capturing ? root.level : 0;
+        animate amplitude { duration: 100ms; easing: ease-out; }
+        property <color> wave-color: root.capturing ? #a9f0c4 : (root.recording ? #e5c48a : #78948a);
+        animate wave-color { duration: 220ms; }
+        Rectangle {
+            width: 56px + parent.pulse * 4px; height: self.width;
+            x: (parent.width - self.width) / 2; y: self.x;
+            border-radius: self.width / 2;
+            background: transparent;
+            border-width: 1px;
+            border-color: parent.wave-color;
+            opacity: root.recording ? 0.2 + parent.pulse * 0.3 : 0;
+        }
+        Rectangle {
+            x: 5px; y: 5px; width: 54px; height: 54px;
+            border-radius: 27px;
+            border-width: 1px;
+            border-color: root.capturing ? #70b98f : #405e51;
+            background: ball-touch.has-hover ? #263e35 : #172522;
+            animate border-color { duration: 220ms; }
+        }
+        for factor[index] in [0.6, 1.0, 0.75]: Rectangle {
+            x: 20px + index * 10px;
+            width: 4px;
+            height: root.capturing ? (10px + 18px * parent.amplitude + 3px * parent.pulse) * factor : 4px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 2px;
+            background: parent.wave-color;
+            animate height { duration: 140ms; easing: ease-out; }
+        }
+        if root.has-pending: Rectangle { x: 45px; y: 12px; width: 6px; height: 6px; border-radius: 3px; background: #ead29e; }
+        ball-touch := TouchArea {
+            property <bool> dragging: false;
+            mouse-cursor: pointer;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) { self.dragging = false; }
+            }
+            moved => {
+                if (self.pressed && !self.dragging && (abs(self.mouse-x - self.pressed-x) > 5px || abs(self.mouse-y - self.pressed-y) > 5px)) {
+                    self.dragging = true;
+                    root.drag();
+                }
+            }
+            clicked => { if (!self.dragging) { root.expand-window(); } }
+        }
+    }
+    if !root.compact: VerticalLayout {
         padding: 12px;
         spacing: 8px;
         HorizontalLayout {
@@ -40,15 +99,14 @@ export component VoiceWindow inherits Window {
                 width: 97px;
                 HorizontalLayout {
                     spacing: 7px;
-                    Rectangle {width: 6px; height: 6px; y: 13px; border-radius: 3px; background: root.recording ? #99dfb0 : #7c9b8b;}
+                    Rectangle {width: 6px; height: 6px; y: 13px; border-radius: 3px; background: root.capturing ? #99dfb0 : #7c9b8b;}
                     Text {text: "本地语音"; color: #e9f3ee; font-size: 13px; font-weight: 600; vertical-alignment: center;}
                 }
-                TouchArea { pointer-event(event) => { if (event.kind == PointerEventKind.down) {root.drag();} } }
             }
             Action {label: root.recording ? "结束说话" : "开始说话"; accent: true; clicked => {root.record();}}
             Action {label: root.speaking ? "停止朗读" : (root.tts-enabled ? "朗读" : "朗读已关"); clicked => {root.read();}}
             Action {width: 35px; label: "设置"; clicked => {root.settings();}}
-            Action {width: 25px; label: "—"; clicked => {root.hide-window();}}
+            Action {width: 35px; label: "收起"; clicked => {root.collapse-window();}}
         }
         Rectangle {height: 2px; background: #304039; Rectangle {width: parent.width * root.level; background: #9bd6b1;}}
         HorizontalLayout {

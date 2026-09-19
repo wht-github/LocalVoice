@@ -72,6 +72,7 @@ fn state(ui: &slint::Weak<VoiceWindow>, recording: bool, speaking: bool, pending
         ui.set_speaking(speaking);
         ui.set_has_pending(pending);
         if !recording {
+            ui.set_capturing(false);
             ui.set_level(0.);
         }
     });
@@ -386,6 +387,7 @@ fn controller(
                 }
             }
             Event::CaptureStarted(id) if id == current && recording => {
+                let _ = ui.upgrade_in_event_loop(|ui| ui.set_capturing(true));
                 status(
                     &ui,
                     if continuous_session {
@@ -632,6 +634,15 @@ fn controller(
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("--interaction-check") => verification::interaction_check(
+            args.get(2)
+                .ok_or_else(|| anyhow::anyhow!("report directory required"))?,
+        ),
+        Some("--floating-check") => verification::floating_check(
+            args.get(2)
+                .ok_or_else(|| anyhow::anyhow!("report directory required"))?,
+            args.iter().any(|arg| arg == "--unpatched"),
+        ),
         Some("--display-check") => verification::display_check(
             args.get(2)
                 .ok_or_else(|| anyhow::anyhow!("report directory required"))?,

@@ -398,6 +398,14 @@ pub fn native_check(expected_pid: u32, output: &str) -> Result<()> {
 // Capture the actual client surface without asking Slint to render a snapshot:
 // take_snapshot() itself invalidates rendering caches and would mask this bug.
 fn surface(window: &slint::Window, output: &std::path::Path) -> Result<Vec<u8>> {
+    capture_surface(window, output, false)
+}
+
+fn capture_surface(
+    window: &slint::Window,
+    output: &std::path::Path,
+    composited: bool,
+) -> Result<Vec<u8>> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use slint::winit_030::WinitWindowAccessor;
     use windows::Win32::Graphics::Gdi::*;
@@ -420,11 +428,29 @@ fn surface(window: &slint::Window, output: &std::path::Path) -> Result<Vec<u8>> 
         GetClientRect(hwnd, &mut rect)?;
         let (width, height) = (rect.right, rect.bottom);
         ensure!(width > 0 && height > 0, "Empty window surface");
-        let source = GetDC(Some(hwnd));
+        let source_window = if composited { None } else { Some(hwnd) };
+        let mut origin = POINT::default();
+        if composited {
+            ensure!(
+                ClientToScreen(hwnd, &mut origin).as_bool(),
+                "Could not locate our own window"
+            );
+        }
+        let source = GetDC(source_window);
         let memory = CreateCompatibleDC(Some(source));
         let bitmap = CreateCompatibleBitmap(source, width, height);
         let old = SelectObject(memory, bitmap.into());
-        let copied = BitBlt(memory, 0, 0, width, height, Some(source), 0, 0, SRCCOPY);
+        let copied = BitBlt(
+            memory,
+            0,
+            0,
+            width,
+            height,
+            Some(source),
+            origin.x,
+            origin.y,
+            SRCCOPY,
+        );
         SelectObject(memory, old);
         let mut info = BITMAPINFO::default();
         info.bmiHeader = BITMAPINFOHEADER {
@@ -448,7 +474,7 @@ fn surface(window: &slint::Window, output: &std::path::Path) -> Result<Vec<u8>> 
         );
         let _ = DeleteObject(bitmap.into());
         let _ = DeleteDC(memory);
-        ReleaseDC(Some(hwnd), source);
+        ReleaseDC(source_window, source);
         copied?;
         ensure!(lines == height, "Incomplete window capture");
         for pixel in pixels.chunks_exact_mut(4) {
@@ -518,7 +544,7 @@ pub fn display_check(directory: &str, unpatched: bool) -> Result<()> {
     use std::rc::Rc;
     use windows::Win32::Graphics::Gdi::*;
     let backend = i_slint_backend_winit::Backend::builder()
-        .with_renderer_name("software")
+        .with_renderer_name(crate::ui::RENDERER)
         .with_window_attributes_hook(|attributes| {
             use slint::winit_030::winit::platform::windows::WindowAttributesExtWindows;
             attributes.with_active(false).with_skip_taskbar(true)
@@ -649,6 +675,482 @@ pub fn display_check(directory: &str, unpatched: bool) -> Result<()> {
         })();
         if let Err(e) = result {
             *error.borrow_mut() = Some(format!("{e:#}"));
+            let _ = slint::quit_event_loop();
+        }
+    });
+    slint::run_event_loop_until_quit()?;
+    if let Some(error) = failure.borrow_mut().take() {
+        bail!(error);
+    }
+    Ok(())
+}
+
+/// Exercise tray restoration and compact presentation using only an owned
+/// window. No services, microphone, keyboard input, or foreground activation.
+pub fn floating_check(directory: &str, unpatched: bool) -> Result<()> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use slint::{ComponentHandle, winit_030::WinitWindowAccessor};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    use windows::Win32::Graphics::Gdi::*;
+
+    let args: Vec<_> = std::env::args().collect();
+    let test_dpi = args
+        .iter()
+        .position(|arg| arg == "--dpi")
+        .map(|index| {
+            args.get(index + 1)
+                .context("--dpi requires 96, 144 or 192")?
+                .parse::<u32>()
+                .map_err(anyhow::Error::from)
+        })
+        .transpose()?;
+    ensure!(
+        test_dpi.is_none_or(|dpi| [96, 144, 192].contains(&dpi)),
+        "Use --dpi 96, 144 or 192"
+    );
+
+    #[derive(Clone, Copy)]
+    enum Case {
+        NativeHidden,
+        Minimized,
+        HiddenOffscreen,
+        DisplayOffscreen,
+        ResumeOffscreen,
+        CompactIdle,
+        CompactStarting,
+        CompactRecording,
+        CompactPending,
+        ExpandedPending,
+    }
+    impl Case {
+        fn name(self) -> &'static str {
+            match self {
+                Self::NativeHidden => "native-hidden",
+                Self::Minimized => "minimized",
+                Self::HiddenOffscreen => "hidden-offscreen",
+                Self::DisplayOffscreen => "display-offscreen",
+                Self::ResumeOffscreen => "resume-offscreen",
+                Self::CompactIdle => "compact-idle",
+                Self::CompactStarting => "compact-starting",
+                Self::CompactRecording => "compact-recording",
+                Self::CompactPending => "compact-pending",
+                Self::ExpandedPending => "expanded-pending",
+            }
+        }
+        fn compact(self) -> bool {
+            matches!(
+                self,
+                Self::CompactIdle
+                    | Self::CompactStarting
+                    | Self::CompactRecording
+                    | Self::CompactPending
+            )
+        }
+        fn pending(self) -> bool {
+            matches!(self, Self::CompactPending | Self::ExpandedPending)
+        }
+    }
+
+    let backend = i_slint_backend_winit::Backend::builder()
+        .with_renderer_name(crate::ui::RENDERER)
+        .with_window_attributes_hook(|attributes| {
+            use slint::winit_030::winit::platform::windows::WindowAttributesExtWindows;
+            attributes.with_active(false).with_skip_taskbar(true)
+        })
+        .build()?;
+    slint::platform::set_platform(Box::new(backend))?;
+    let ui = crate::VoiceWindow::new()?;
+    let weak = ui.as_weak();
+    let mut floating = crate::ui::FloatingState::default();
+    let drag_count = Rc::new(Cell::new(0));
+    let drags = drag_count.clone();
+    ui.on_drag(move || drags.set(drags.get() + 1));
+    let expand = ui.as_weak();
+    ui.on_expand_window(move || {
+        if let Some(ui) = expand.upgrade() {
+            let _ = crate::ui::show_panel(&ui);
+        }
+    });
+    ui.window().on_winit_window_event(move |_, event| {
+        if let Some(ui) = weak.upgrade() {
+            floating.event(&ui, event);
+        }
+        i_slint_backend_winit::EventResult::Propagate
+    });
+    crate::ui::show_panel(&ui)?;
+
+    let cases = [
+        Case::NativeHidden,
+        Case::Minimized,
+        Case::HiddenOffscreen,
+        Case::DisplayOffscreen,
+        Case::ResumeOffscreen,
+        Case::CompactIdle,
+        Case::CompactStarting,
+        Case::CompactRecording,
+        Case::CompactPending,
+        Case::ExpandedPending,
+    ];
+    let output = std::path::PathBuf::from(directory);
+    std::fs::create_dir_all(&output)?;
+    let step = Cell::new(0usize);
+    let prepared = RefCell::new(serde_json::Value::Null);
+    let earlier_frame = RefCell::new(Vec::<u8>::new());
+    let focus_preserved = Cell::new(true);
+    let reports = RefCell::new(Vec::<serde_json::Value>::new());
+    let failure = Rc::new(RefCell::new(None));
+    let error = failure.clone();
+    let weak = ui.as_weak();
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, Duration::from_millis(400), move || {
+        let result = (|| -> Result<()> {
+            let ui = weak.upgrade().context("Floating fixture closed")?;
+            let index = step.get() / 4;
+            let phase = step.get() % 4;
+            let case = cases[index];
+            let mut hwnd = HWND::default();
+            ui.window().with_winit_window(|window| {
+                if let Ok(handle) = window.window_handle() {
+                    if let RawWindowHandle::Win32(handle) = handle.as_raw() {
+                        hwnd = HWND(handle.hwnd.get() as *mut _);
+                    }
+                }
+            });
+            unsafe {
+                let mut owner = 0;
+                GetWindowThreadProcessId(hwnd, Some(&mut owner));
+                ensure!(
+                    owner == windows::Win32::System::Threading::GetCurrentProcessId(),
+                    "Only manipulate the owned floating fixture"
+                );
+                ensure!(GetForegroundWindow() != hwnd, "Floating fixture took foreground focus");
+            }
+            // Compare around our synchronous actions, not across the whole
+            // run: the user may legitimately switch between other apps.
+            let foreground = unsafe { GetForegroundWindow() };
+            match phase {
+                0 => {
+                    focus_preserved.set(true);
+                    // Reset through the working path so ablation cases are independent.
+                    ui.set_recording(false);
+                    ui.set_capturing(false);
+                    ui.set_has_pending(false);
+                    ui.set_level(0.);
+                    ui.set_status("准备就绪 · 点击开始说话".into());
+                    crate::ui::show_panel(&ui)?;
+                    if let Some(dpi) = test_dpi {
+                        unsafe {
+                            let mut rect = RECT::default();
+                            GetWindowRect(hwnd, &mut rect)?;
+                            SendMessageW(hwnd, WM_DPICHANGED, Some(WPARAM((dpi | dpi << 16) as usize)), Some(LPARAM(&rect as *const _ as isize)));
+                        }
+                    }
+                }
+                1 => unsafe {
+                    match case {
+                        Case::NativeHidden => {
+                            let _ = ShowWindow(hwnd, SW_HIDE);
+                        }
+                        Case::Minimized => {
+                            let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+                        }
+                        Case::HiddenOffscreen | Case::DisplayOffscreen | Case::ResumeOffscreen => {
+                            if matches!(case, Case::HiddenOffscreen) {
+                                ui.hide()?;
+                            }
+                            let x = GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN) + 500;
+                            let y = GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN) + 500;
+                            SetWindowPos(hwnd, None, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)?;
+                            match case {
+                                Case::DisplayOffscreen => {
+                                    SendMessageW(hwnd, WM_DISPLAYCHANGE, Some(WPARAM(32)), Some(LPARAM(0)));
+                                }
+                                Case::ResumeOffscreen => {
+                                    SendMessageW(hwnd, WM_POWERBROADCAST, Some(WPARAM(PBT_APMRESUMEAUTOMATIC as usize)), Some(LPARAM(0)));
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {
+                            ui.set_recording(matches!(case, Case::CompactStarting | Case::CompactRecording));
+                            ui.set_capturing(matches!(case, Case::CompactRecording));
+                            ui.set_has_pending(case.pending());
+                            ui.set_level(if matches!(case, Case::CompactRecording) { 0.72 } else { 0. });
+                            crate::ui::set_compact(&ui, true);
+                        }
+                    }
+                    *prepared.borrow_mut() = serde_json::json!({
+                        "native_visible": IsWindowVisible(hwnd).as_bool(),
+                        "slint_visible": ui.window().is_visible(),
+                        "minimized": IsIconic(hwnd).as_bool(),
+                    });
+                },
+                2 if case.compact() => {
+                    if matches!(case, Case::CompactIdle) {
+                        let before = surface(ui.window(), &output.join("hover-before.png"))?;
+                        unsafe {
+                            SendMessageW(hwnd, WM_NCPAINT, Some(WPARAM(1)), Some(LPARAM(0)));
+                            SendMessageW(hwnd, WM_NCACTIVATE, Some(WPARAM(1)), Some(LPARAM(0)));
+                            ensure!(SendMessageW(hwnd, WM_NCHITTEST, Some(WPARAM(0)), Some(LPARAM(0))) == LRESULT(HTCLIENT as isize), "Floating window must have no native caption hit area");
+                        }
+                        let after = surface(ui.window(), &output.join("hover-after.png"))?;
+                        let changed = before.iter().zip(&after).filter(|(a, b)| a != b).count();
+                        std::fs::write(output.join("native-frame.json"), serde_json::to_vec_pretty(&serde_json::json!({"changed_bytes": changed}))?)?;
+                        ensure!(changed == 0, "Native caption painting corrupted the floating ball");
+                    }
+                    *earlier_frame.borrow_mut() = ui.window().take_snapshot()?.as_bytes().to_vec();
+                }
+                2 => {
+                    if unpatched && !matches!(case, Case::ExpandedPending) {
+                        // Previous tray behavior: Slint show can be a no-op when
+                        // Win32 visibility/minimization differs from its cache.
+                        ui.show()?;
+                        crate::ui::mark_complete(ui.window());
+                        ui.window().request_redraw();
+                    } else {
+                        crate::ui::show_panel(&ui)?;
+                    }
+                }
+                3 => unsafe {
+                    let mut rect = RECT::default();
+                    let mut client = RECT::default();
+                    let mut monitor = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+                    GetWindowRect(hwnd, &mut rect)?;
+                    GetClientRect(hwnd, &mut client)?;
+                    ensure!(GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor).as_bool());
+                    let visible = IsWindowVisible(hwnd).as_bool();
+                    let minimized = IsIconic(hwnd).as_bool();
+                    let in_work_area = rect.left >= monitor.rcWork.left && rect.top >= monitor.rcWork.top
+                        && rect.right <= monitor.rcWork.right && rect.bottom <= monitor.rcWork.bottom;
+                    let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                    let no_activate = style & WS_EX_NOACTIVATE.0 as isize != 0;
+                    let topmost = style & WS_EX_TOPMOST.0 as isize != 0;
+                    let scale = ui.window().scale_factor();
+                    let expected = if case.compact() { (64., 64.) } else if case.pending() { (380., 138.) } else { (380., 102.) };
+                    let size_ok = client.right == (expected.0 * scale).round() as i32
+                        && client.bottom == (expected.1 * scale).round() as i32;
+                    let region = CreateRectRgn(0, 0, 0, 0);
+                    let region_type = GetWindowRgn(hwnd, region);
+                    let center_in_region = PtInRegion(region, client.right / 2, client.bottom / 2).as_bool();
+                    let corner_in_region = PtInRegion(region, 0, 0).as_bool();
+                    let mut region_bounds = RECT::default();
+                    let _ = GetRgnBox(region, &mut region_bounds);
+                    let shape_ok = if case.compact() {
+                        region_type == COMPLEXREGION && center_in_region && !corner_in_region
+                    } else {
+                        // Windows may install a full rectangular region when
+                        // updating a borderless window. Only clipping is wrong.
+                        region_type.0 == 0 || (region_type == SIMPLEREGION
+                            && region_bounds.left == 0 && region_bounds.top == 0
+                            && region_bounds.right == client.right && region_bounds.bottom == client.bottom)
+                    };
+                    let _ = DeleteObject(region.into());
+                    let foreground_unchanged = focus_preserved.get() && GetForegroundWindow() != hwnd;
+                    let state_ok = ui.get_compact() == case.compact()
+                        && ui.get_has_pending() == case.pending()
+                        && ui.get_recording() == matches!(case, Case::CompactStarting | Case::CompactRecording)
+                        && ui.get_capturing() == matches!(case, Case::CompactRecording);
+                    if visible && !minimized && in_work_area {
+                        surface(ui.window(), &output.join(format!("{}.png", case.name())))?;
+                        if case.compact() {
+                            capture_surface(ui.window(), &output.join(format!("{}-desktop.png", case.name())), true)?;
+                        }
+                    }
+                    let mut alpha_edge_pixels = 0;
+                    let mut animation_changed_bytes = 0;
+                    if case.compact() {
+                        let frame = ui.window().take_snapshot()?;
+                        let pixels = frame.as_bytes();
+                        let mut encoder = png::Encoder::new(std::fs::File::create(output.join(format!("{}-rgba.png", case.name())))?, frame.width(), frame.height());
+                        encoder.set_color(png::ColorType::Rgba);
+                        encoder.set_depth(png::BitDepth::Eight);
+                        encoder.write_header()?.write_image_data(pixels)?;
+                        alpha_edge_pixels = pixels.chunks_exact(4).filter(|pixel| pixel[3] > 0 && pixel[3] < 255).count();
+                        ensure!(pixels[3] == 0 && alpha_edge_pixels > 20, "Ball needs transparent margins and antialiased alpha edges");
+                        animation_changed_bytes = pixels.iter().zip(earlier_frame.borrow().iter()).filter(|(a,b)| a != b).count();
+                        let animated = matches!(case, Case::CompactStarting | Case::CompactRecording);
+                        ensure!((animation_changed_bytes > 0) == animated, "Active ball must animate; idle ball must settle");
+                    }
+                    if matches!(case, Case::CompactRecording) {
+                        // Exercise the actual ball TouchArea, with a local drag
+                        // callback instead of entering Windows' mouse move loop.
+                        use slint::platform::{PointerEventButton, WindowEvent};
+                        let start = slint::LogicalPosition::new(32., 26.);
+                        let end = slint::LogicalPosition::new(44., 26.);
+                        ui.window().dispatch_event(WindowEvent::PointerMoved { position: start });
+                        ui.window().dispatch_event(WindowEvent::PointerPressed { position: start, button: PointerEventButton::Left });
+                        ui.window().dispatch_event(WindowEvent::PointerMoved { position: end });
+                        ui.window().dispatch_event(WindowEvent::PointerReleased { position: end, button: PointerEventButton::Left });
+                        ensure!(ui.get_compact() && drag_count.get() == 1, "Dragging the ball must not expand it: compact={}, drags={}", ui.get_compact(), drag_count.get());
+                        ui.window().dispatch_event(WindowEvent::PointerMoved { position: start });
+                        ui.window().dispatch_event(WindowEvent::PointerPressed { position: start, button: PointerEventButton::Left });
+                        ui.window().dispatch_event(WindowEvent::PointerReleased { position: start, button: PointerEventButton::Left });
+                        ensure!(!ui.get_compact() && ui.get_recording() && ui.get_capturing(), "Click must expand without stopping capture");
+                    }
+                    reports.borrow_mut().push(serde_json::json!({
+                        "case": case.name(), "prepared": *prepared.borrow(),
+                        "visible": visible, "minimized": minimized, "in_work_area": in_work_area,
+                        "no_activate": no_activate, "topmost": topmost,
+                        "foreground_unchanged": foreground_unchanged, "scale": scale,
+                        "physical_size": [client.right, client.bottom], "size_ok": size_ok,
+                        "region_type": region_type.0, "center_in_region": center_in_region,
+                        "corner_in_region": corner_in_region, "shape_ok": shape_ok,
+                        "state_ok": state_ok,
+                        "alpha_edge_pixels": alpha_edge_pixels, "animation_changed_bytes": animation_changed_bytes,
+                        "passed": visible && !minimized && in_work_area && no_activate && topmost
+                            && foreground_unchanged && size_ok && shape_ok && state_ok,
+                    }));
+                    if index + 1 == cases.len() {
+                        let all_passed = reports.borrow().iter().all(|row| row["passed"] == true);
+                        let ablation_detected = reports.borrow().iter().take(5).any(|row| row["passed"] == false);
+                        std::fs::write(output.join("result.json"), serde_json::to_vec_pretty(&serde_json::json!({
+                            "unpatched": unpatched, "all_passed": all_passed,
+                            "ablation_detected": ablation_detected, "cases": *reports.borrow(),
+                            "note": "Owned window only; synthetic display/resume messages. Capture state is simulated. No services, audio, system display changes, activation, or input to other apps."
+                        }))?)?;
+                        ensure!(if unpatched { ablation_detected } else { all_passed }, "Floating recovery regression; see result.json");
+                        slint::quit_event_loop()?;
+                    }
+                }
+                _ => {}
+            }
+            focus_preserved.set(focus_preserved.get() && unsafe { GetForegroundWindow() == foreground });
+            step.set(step.get() + 1);
+            Ok(())
+        })();
+        if let Err(e) = result {
+            let message = format!("{e:#}");
+            let _ = std::fs::write(output.join("error.txt"), &message);
+            *error.borrow_mut() = Some(message);
+            let _ = slint::quit_event_loop();
+        }
+    });
+    slint::run_event_loop_until_quit()?;
+    if let Some(error) = failure.borrow_mut().take() {
+        bail!(error);
+    }
+    Ok(())
+}
+
+/// Run the production presentation controller in an isolated window. Pointer
+/// events are local to this fixture; the user's cursor and audio are untouched.
+pub fn interaction_check(directory: &str) -> Result<()> {
+    use slint::{
+        ComponentHandle,
+        winit_030::{WinitWindowAccessor, winit},
+    };
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
+    let backend = i_slint_backend_winit::Backend::builder()
+        .with_renderer_name(crate::ui::RENDERER)
+        .with_window_attributes_hook(|attributes| {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attributes.with_active(false).with_skip_taskbar(true)
+        })
+        .build()?;
+    slint::platform::set_platform(Box::new(backend))?;
+    let ui = crate::VoiceWindow::new()?;
+    let presentation = crate::ui::Presentation::new(&ui);
+    let expand = presentation.clone();
+    ui.on_expand_window(move || {
+        let _ = expand.show_panel();
+    });
+    let collapse = presentation.clone();
+    ui.on_collapse_window(move || {
+        let _ = collapse.show_ball();
+    });
+    let weak = ui.as_weak();
+    let mut floating = crate::ui::FloatingState::default();
+    ui.window().on_winit_window_event(move |_, event| {
+        if let Some(ui) = weak.upgrade() {
+            floating.event(&ui, event);
+        }
+        // Use only synthetic enter/leave below, so the real cursor cannot
+        // invalidate the timing assertions while the user works elsewhere.
+        i_slint_backend_winit::EventResult::Propagate
+    });
+    presentation.show_ball()?;
+    let output = std::path::PathBuf::from(directory);
+    std::fs::create_dir_all(&output)?;
+    let phase = Cell::new(0);
+    let anchor = Cell::new(slint::PhysicalPosition::default());
+    let failure = Rc::new(RefCell::new(None));
+    let error = failure.clone();
+    let weak = ui.as_weak();
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, Duration::from_millis(1600), move || {
+        let result = (|| -> Result<()> {
+            let ui = weak.upgrade().context("Fixture closed")?;
+            let left = winit::event::WindowEvent::CursorLeft { device_id: winit::event::DeviceId::dummy() };
+            let entered = winit::event::WindowEvent::CursorEntered { device_id: winit::event::DeviceId::dummy() };
+            let foreground = unsafe { GetForegroundWindow() };
+            match phase.get() {
+                0 => {
+                    ensure!(ui.get_compact() && ui.window().size().to_logical(ui.window().scale_factor()).width == 64., "Startup must show ball");
+                    // Left edge expansion is clamped. Collapsing must still
+                    // recover the ball's original location without drift.
+                    ui.window().set_position(slint::PhysicalPosition::new(12, 160));
+                }
+                1 => {
+                    anchor.set(ui.window().position());
+                    ui.set_recording(true);
+                    ui.set_capturing(true);
+                    ui.invoke_expand_window();
+                    presentation.event(&left);
+                    presentation.event(&entered);
+                }
+                2 => {
+                    ensure!(!ui.get_compact(), "Returning pointer must cancel collapse");
+                    presentation.event(&left);
+                }
+                3 => {
+                    ensure!(ui.get_compact() && ui.window().position() == anchor.get(), "Auto collapse must return to ball anchor");
+                    ensure!(ui.get_capturing() && ui.get_recording(), "Presentation must preserve capture");
+                    ui.invoke_expand_window();
+                    ui.set_has_pending(true);
+                    presentation.event(&left);
+                }
+                4 => {
+                    ensure!(!ui.get_compact(), "Pending result must keep panel open");
+                    let size = ui.window().size().to_logical(ui.window().scale_factor());
+                    ensure!((size.height - 138.).abs() < 1., "Pending result must expand panel height: {size:?}");
+                    ui.set_has_pending(false);
+                }
+                5 => {
+                    ensure!(ui.get_compact(), "Panel must collapse after pending result is handled");
+                    ui.invoke_expand_window();
+                    presentation.hide()?;
+                    ensure!(!ui.window().is_visible() && !ui.get_animation_enabled(), "Hide must stop drawing");
+                    presentation.show_ball()?;
+                    presentation.show_ball()?;
+                }
+                6 => {
+                    ensure!(ui.get_compact() && ui.window().is_visible() && ui.window().position() == anchor.get(), "Repeated tray reveal must restore ball without drift");
+                    ui.invoke_expand_window();
+                    ui.invoke_collapse_window();
+                }
+                7 => {
+                    ensure!(ui.get_compact() && ui.window().position() == anchor.get(), "Explicit collapse must restore anchor");
+                    std::fs::write(output.join("result.json"), serde_json::to_vec_pretty(&serde_json::json!({
+                        "passed": true,
+                        "checks": ["startup ball", "reentry cancels collapse", "leave collapses", "edge anchor restored", "capture preserved", "pending keeps panel open", "pending resizes panel", "cleared pending collapses", "hidden animation stops", "repeated tray reveal", "explicit collapse"],
+                        "note": "Production presentation controller; synthetic local pointer events and capture state; no services or audio."
+                    }))?)?;
+                    slint::quit_event_loop()?;
+                }
+                _ => unreachable!(),
+            }
+            ensure!(unsafe { GetForegroundWindow() } == foreground, "Presentation stole foreground focus");
+            phase.set(phase.get() + 1);
+            Ok(())
+        })();
+        if let Err(e) = result {
+            let message = format!("{e:#}");
+            let _ = std::fs::write(output.join("error.txt"), &message);
+            *error.borrow_mut() = Some(message);
             let _ = slint::quit_event_loop();
         }
     });
