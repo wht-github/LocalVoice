@@ -35,8 +35,8 @@
 | --- | --- | --- |
 | CPU 语音输入 | 首次启动自动准备 SenseVoice INT8、Silero VAD 和 CPU 推理运行库 | 合计约 **182 MB** |
 | 日常输入、笔记整理 | 设置 → “下载并准备整理模型”，完成后选择相应输出模式 | AgenticASR-Refiner 约 **688 MB**，两种模式共用 |
-| Qwen ASR 0.6B | 双击 `Setup Models.cmd` 选择 0.6B，再在应用设置中切换识别模型 | 权重约 **1.18 GB** + CUDA 运行库约 **540 MB** |
-| Qwen ASR 1.7B | 双击 `Setup Models.cmd` 选择 1.7B，再在应用设置中切换识别模型 | 权重约 **2.81 GB** + 同一套 CUDA 运行库 |
+| Qwen ASR 0.6B | 双击 `Setup Models.cmd` 选择 0.6B，再在应用设置中切换识别模型并保存 | 权重约 **1.18 GB** + CUDA 运行库约 **540 MB** |
+| Qwen ASR 1.7B | 双击 `Setup Models.cmd` 选择 1.7B，再在应用设置中切换识别模型并保存 | 权重约 **2.81 GB** + 同一套 CUDA 运行库 |
 
 Qwen 路线需要兼容所附 CUDA 13.3 运行库的 NVIDIA 显卡与驱动。两套 Qwen 可二选一；安装另一套时复用已准备的 CUDA 运行库。模型下载大小不等于内存占用：Agentic 在前轮本机测试中工作集约 **1.20 GiB**，使用 CPU，不占模型显存。具体表现取决于电脑与口述内容，详见 [模型实测与限制](docs/dictation-evaluation.md)。
 

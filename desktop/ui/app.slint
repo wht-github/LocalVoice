@@ -183,7 +183,7 @@ export component SettingsWindow inherits Window {
                 HorizontalLayout { Text {text: "识别模型"; width: 90px;} ComboBox {model: root.asr-modes; current-index <=> root.asr-mode-index;} }
                 Text {text: "技术口述可优先试用 Qwen 1.7B；请根据自己的中英术语识别效果选择。"; font-size: 12px; wrap: word-wrap;}
                 Button {text: "安装 / 管理模型"; enabled: !root.services-busy && !root.text-busy; clicked => {root.install-models();}}
-                Text {text: "首次使用先安装基础模型（约 182 MB 下载）。安装窗口也可添加 Qwen；完成后点击下方「加载已选模型」。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                Text {text: "首次使用先安装基础模型（约 182 MB 下载）。添加 Qwen 后，选择对应识别模型并保存；仅补齐文件时点击「加载已选模型」。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
                 HorizontalLayout { Text {text: "说话快捷键"; width: 90px;} LineEdit {text <=> root.record-key;} }
                 CheckBox {text: "连续听写（仅原样转写，停顿后输入）"; checked <=> root.continuous-dictation;}
                 Text {text: "日常输入和笔记始终手动结束录音，不改变上面的连续听写偏好。"; font-size: 11px; wrap: word-wrap; color: #68756d;}

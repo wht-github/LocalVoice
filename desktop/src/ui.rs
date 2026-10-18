@@ -462,7 +462,7 @@ pub fn run() -> Result<()> {
                     Ok(()) => {
                         settings.set_error("".into());
                         settings.set_service_status(
-                            "已打开安装窗口；完成后请点击「加载已选模型」".into(),
+                            "已打开安装窗口；完成后选择对应模型并保存；仅补齐文件可点击「加载已选模型」".into(),
                         );
                     }
                     Err(error) => settings.set_error(error.to_string().into()),

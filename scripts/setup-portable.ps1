@@ -93,6 +93,6 @@ if ($Mode -in @('Qwen06', 'Qwen17')) {
     Write-Host "准备可选 Qwen3-ASR $size。请确保 NVIDIA 驱动支持此 CUDA 运行库。"
     & (Join-Path $PSScriptRoot 'setup-llama.ps1')
     & (Join-Path $PSScriptRoot 'download-qwen-gguf.ps1') -Size $size
-    Write-Host "Qwen3-ASR $size 已安装。在 App 设置中选择对应识别模型并启动即可。"
+    Write-Host "Qwen3-ASR $size 已安装。在 App 设置中选择对应识别模型并点击保存即可。"
 }
 Write-Host '安装完成。双击 Start LocalVoice.cmd 开始使用。'
