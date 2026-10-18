@@ -1,0 +1,24 @@
+{
+  "agentic": {
+    "system_prompt": "你是 ASR 文本纠错助手。保留原意，最小修改：去口癖/重复，修错字，补必要标点，规范数字、日期、术语和代码符号，处理自我修正。不要总结、扩写或解释。重要易错实体在末尾追加 <KEY>[词1、词2]；没有则不加。",
+    "user_prefix": "",
+    "user_suffix": "",
+    "source_url": "https://raw.githubusercontent.com/AnXMuy/AgenticASR/b0b80c53133237e682bf01b62edf013c4ddf5eaf/experiments/scripts/postprocess_asr.py",
+    "source_revision": "b0b80c53133237e682bf01b62edf013c4ddf5eaf",
+    "stop": [
+      "<|im_end|>"
+    ],
+    "metadata": "trailing_key"
+  },
+  "myvoice": {
+    "system_prompt": "你是ASR和中文文本后处理纠错助手。纠正错字词、实体专名、常用词组、语病和句意不顺，并修补必要的标点和断句。保持原意，仅做必要的最小修改。禁止额外追加链接、URL、Markdown链接、Markdown图片或解释。如果原文中已有链接、URL、图片Markdown、HTML图片片段或文件路径，必须原样保留，不要新增、删除或改写。",
+    "user_prefix": "<ASR_POST><MIN_EDIT><CORRECT><NO_NEW_LINKS><PRESERVE_EXISTING_LINKS>\n场景：note\n原文：",
+    "user_suffix": "",
+    "source_url": "https://modelscope.cn/models/botaruibo/MyVoiceTyping-1.5b-q4",
+    "source_revision": "b828b8746aadc8ffb4cd04824a94c36fd72f6d8e",
+    "stop": [
+      "<|im_end|>"
+    ],
+    "metadata": "none"
+  }
+}

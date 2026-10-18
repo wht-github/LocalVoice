@@ -46,8 +46,7 @@ impl Presentation {
                 ui.window().set_position(position);
             }
         }
-        ui.set_animation_enabled(true);
-        show_complete(ui.window())
+        show_floating(&ui)
     }
 
     pub(crate) fn show_panel(&self) -> Result<()> {
@@ -62,7 +61,7 @@ impl Presentation {
             set_compact(&ui, false);
             ui.window().set_size(slint::LogicalSize::new(
                 380.,
-                if ui.get_has_pending() { 138. } else { 102. },
+                if ui.get_has_pending() { 202. } else { 166. },
             ));
             ui.window().set_position(slint::PhysicalPosition::new(
                 position.x - (316. * ui.window().scale_factor()).round() as i32,
@@ -185,6 +184,18 @@ pub(crate) fn show_complete(window: &slint::Window) -> Result<()> {
 fn show_settings(window: &slint::Window) -> Result<()> {
     show_complete(window)?;
     window.with_winit_window(|w| {
+        // Keep the forms usable on scaled laptop displays; their bodies scroll.
+        if let Some(monitor) = w.current_monitor() {
+            let scale = w.scale_factor() as f32;
+            let available = monitor.size();
+            let size = window.size().to_logical(scale);
+            window.set_size(slint::LogicalSize::new(
+                size.width
+                    .min((available.width as f32 / scale - 32.).max(420.)),
+                size.height
+                    .min((available.height as f32 / scale - 100.).max(380.)),
+            ));
+        }
         w.set_minimized(false);
         if let Ok(handle) = w.window_handle() {
             if let RawWindowHandle::Win32(h) = handle.as_raw() {
@@ -278,9 +289,18 @@ pub fn run() -> Result<()> {
         .build()?;
     slint::platform::set_platform(Box::new(backend))?;
     let ui = VoiceWindow::new()?;
+    ui.set_output_mode(config.output_mode.clone().into());
     let presentation = Presentation::new(&ui);
-    ui.set_tts_enabled(config.tts_enabled);
     let settings = SettingsWindow::new()?;
+    settings.set_app_version(concat!("v", env!("CARGO_PKG_VERSION")).into());
+    let result = ResultWindow::new()?;
+    result.set_output_mode(config.output_mode.clone().into());
+    let mut result_pointer = PointerState::default();
+    let mut result_display = DisplayState::default();
+    result.window().on_winit_window_event(move |window, event| {
+        result_display.event(window, event);
+        result_pointer.event(window, event)
+    });
     let mut settings_pointer = PointerState::default();
     let mut settings_display = DisplayState::default();
     settings
@@ -293,14 +313,69 @@ pub fn run() -> Result<()> {
     let (tx, rx) = mpsc::channel();
     {
         let tx = tx.clone();
-        ui.on_record(move || {
-            let _ = tx.send(Event::Record);
+        ui.on_select_output(move |mode| {
+            let _ = tx.send(Event::SelectOutput(mode.to_string()));
         });
     }
     {
+        let weak = result.as_weak();
+        let presentation = presentation.clone();
+        ui.on_show_result(move || {
+            let weak = weak.clone();
+            let presentation = presentation.clone();
+            Timer::single_shot(Duration::from_millis(1), move || {
+                let _ = presentation.show_ball();
+                if let Some(result) = weak.upgrade() {
+                    let _ = show_settings(result.window());
+                }
+            });
+        });
+    }
+    result.on_copy_original({
         let tx = tx.clone();
-        ui.on_read(move || {
-            let _ = tx.send(Event::Read);
+        move || {
+            let _ = tx.send(Event::CopyOriginal);
+        }
+    });
+    result.on_copy_result({
+        let tx = tx.clone();
+        move || {
+            let _ = tx.send(Event::CopyResult);
+        }
+    });
+    result.on_retry_text({
+        let tx = tx.clone();
+        move || {
+            let _ = tx.send(Event::RetryText);
+        }
+    });
+    result.on_select_output({
+        let tx = tx.clone();
+        move |mode| {
+            let _ = tx.send(Event::SelectOutput(mode.to_string()));
+        }
+    });
+    result.on_close_result({
+        let weak = result.as_weak();
+        move || {
+            if let Some(result) = weak.upgrade() {
+                let _ = result.hide();
+            }
+        }
+    });
+    result.window().on_close_requested({
+        let weak = result.as_weak();
+        move || {
+            if let Some(result) = weak.upgrade() {
+                let _ = result.hide();
+            }
+            slint::CloseRequestResponse::KeepWindowShown
+        }
+    });
+    {
+        let tx = tx.clone();
+        ui.on_record(move || {
+            let _ = tx.send(Event::Record);
         });
     }
     {
@@ -373,15 +448,34 @@ pub fn run() -> Result<()> {
             let _ = tx.send(Event::StopServices);
         }
     });
+    settings.on_prepare_text({
+        let tx = tx.clone();
+        move || {
+            let _ = tx.send(Event::PrepareText);
+        }
+    });
     let microphones = Rc::new(RefCell::new(Vec::<String>::new()));
-    let voices = Rc::new(RefCell::new(Vec::<String>::new()));
+    // Health reads do not load the model or extend its idle lifetime. Refresh
+    // only while settings are visible; requests have a shorter timeout than the timer.
+    let text_refresh = Timer::default();
+    text_refresh.start(TimerMode::Repeated, Duration::from_secs(5), {
+        let settings = settings.as_weak();
+        let current = shared.clone();
+        move || {
+            if settings
+                .upgrade()
+                .is_some_and(|s| s.window().is_visible() && !s.get_text_busy())
+            {
+                refresh_text_status(settings.clone(), current.lock().unwrap().clone());
+            }
+        }
+    });
     // One reusable timer avoids retaining a timer/callback cycle after each settings visit.
     let refresh = Rc::new(Timer::default());
     let open_settings: Rc<dyn Fn()> = Rc::new({
         let settings = settings.as_weak();
         let cfg = shared.clone();
         let mic = microphones.clone();
-        let voice = voices.clone();
         let refresh = refresh.clone();
         move || {
             diagnostics::record("settings_requested", serde_json::json!({}));
@@ -389,6 +483,9 @@ pub fn run() -> Result<()> {
                 return;
             };
             let config = cfg.lock().unwrap().clone();
+            if !settings.get_text_busy() {
+                refresh_text_status(settings.as_weak(), config.clone());
+            }
             let mut devices = vec!["系统默认麦克风".to_owned()];
             if !config.microphone.is_empty() {
                 devices.push(config.microphone.clone());
@@ -403,14 +500,7 @@ pub fn run() -> Result<()> {
                 devices.iter().map(SharedString::from).collect::<Vec<_>>(),
             )));
             *mic.borrow_mut() = devices;
-            *voice.borrow_mut() = vec![config.voice.clone()];
-            settings.set_voices(ModelRc::new(VecModel::from(vec![SharedString::from(
-                &config.voice,
-            )])));
-            settings.set_voice_index(0);
             settings.set_record_key(config.record_key.clone().into());
-            settings.set_read_key(config.read_key.clone().into());
-            settings.set_asr_url(config.asr_url.clone().into());
             settings.set_asr_modes(ModelRc::new(VecModel::from(
                 crate::config::ASR_MODES
                     .iter()
@@ -423,10 +513,9 @@ pub fn run() -> Result<()> {
                     .position(|(mode, _)| *mode == config.asr_mode)
                     .unwrap_or(0) as i32,
             );
-            settings.set_tts_url(config.tts_url.clone().into());
-            settings.set_speed(config.speed);
             settings.set_continuous_dictation(config.continuous_dictation);
-            settings.set_tts_enabled(config.tts_enabled);
+            settings.set_show_note_preview(config.show_note_preview);
+            settings.set_terms_text(crate::config::format_terms(&config.terms).into());
             settings.set_auto_start_services(config.auto_start_services);
             settings.set_error("".into());
             if let Err(error) = show_settings(settings.window()) {
@@ -444,14 +533,7 @@ pub fn run() -> Result<()> {
             let mic_list = mic.clone();
             let selected_mic = config.microphone.clone();
             let mut mic_done = false;
-            let mut voice_done = false;
             let deadline = Instant::now() + Duration::from_secs(10);
-            let (voice_tx, voice_rx) = mpsc::channel();
-            let selected = config.voice.clone();
-            thread::spawn(move || {
-                let _ = voice_tx.send(service::voices(&config));
-            });
-            let list = voice.clone();
             let timer = Rc::downgrade(&refresh);
             refresh.start(TimerMode::Repeated, Duration::from_millis(100), move || {
                 if let Ok(devices) = mic_rx.try_recv() {
@@ -473,32 +555,7 @@ pub fn run() -> Result<()> {
                         *mic_list.borrow_mut() = items;
                     }
                 }
-                if let Ok(result) = voice_rx.try_recv() {
-                    voice_done = true;
-                    if let (Ok(items), Some(settings)) = (result, weak.upgrade()) {
-                        let labels: Vec<_> = items
-                            .iter()
-                            .map(|v| {
-                                SharedString::from(if v.name.is_empty() { &v.id } else { &v.name })
-                            })
-                            .collect();
-                        let ids: Vec<_> = items
-                            .into_iter()
-                            .map(|v| {
-                                let _ = v.language;
-                                v.id
-                            })
-                            .collect();
-                        if !ids.is_empty() {
-                            settings.set_voice_index(
-                                ids.iter().position(|v| *v == selected).unwrap_or(0) as i32,
-                            );
-                            settings.set_voices(ModelRc::new(VecModel::from(labels)));
-                            *list.borrow_mut() = ids;
-                        }
-                    }
-                }
-                if (mic_done && voice_done) || Instant::now() >= deadline {
+                if mic_done || Instant::now() >= deadline {
                     if let Some(timer) = timer.upgrade() {
                         timer.stop();
                     }
@@ -525,23 +582,25 @@ pub fn run() -> Result<()> {
         let tx = tx.clone();
         let current = shared.clone();
         let mic = microphones.clone();
-        let voice = voices.clone();
         settings.on_save(move || {
             if let Some(s) = weak.upgrade() {
                 let mut cfg = current.lock().unwrap().clone();
                 cfg.record_key = s.get_record_key().to_string();
-                cfg.read_key = s.get_read_key().to_string();
-                cfg.asr_url = s.get_asr_url().to_string();
                 let Some((mode, _)) = crate::config::ASR_MODES.get(s.get_asr_mode_index() as usize)
                 else {
                     s.set_error("请选择识别模型".into());
                     return;
                 };
                 cfg.asr_mode = (*mode).into();
-                cfg.tts_url = s.get_tts_url().to_string();
-                cfg.speed = s.get_speed();
+                cfg.terms = match crate::config::parse_terms(&s.get_terms_text()) {
+                    Ok(terms) => terms,
+                    Err(error) => {
+                        s.set_error(error.to_string().into());
+                        return;
+                    }
+                };
                 cfg.continuous_dictation = s.get_continuous_dictation();
-                cfg.tts_enabled = s.get_tts_enabled();
+                cfg.show_note_preview = s.get_show_note_preview();
                 cfg.auto_start_services = s.get_auto_start_services();
                 cfg.microphone = if s.get_microphone_index() == 0 {
                     String::new()
@@ -551,21 +610,16 @@ pub fn run() -> Result<()> {
                         .cloned()
                         .unwrap_or_default()
                 };
-                cfg.voice = voice
-                    .borrow()
-                    .get(s.get_voice_index() as usize)
-                    .cloned()
-                    .unwrap_or(cfg.voice);
                 let _ = tx.send(Event::Configure(cfg));
             }
         });
     }
     let menu = Menu::new();
     let visibility = MenuItem::new("隐藏桌面入口", true, None);
-    let read = MenuItem::new("朗读剪贴板", true, None);
     let setup = MenuItem::new("设置", true, None);
+    let latest = MenuItem::new("最近结果", true, None);
     let quit = MenuItem::new("退出", true, None);
-    menu.append_items(&[&visibility, &read, &setup, &quit])?;
+    menu.append_items(&[&visibility, &latest, &setup, &quit])?;
     let mut rgba = vec![0u8; 32 * 32 * 4];
     for y in 0..32 {
         for x in 0..32 {
@@ -581,7 +635,7 @@ pub fn run() -> Result<()> {
         }
     }
     let tray = TrayIconBuilder::new()
-        .with_tooltip("本地语音 · 说话输入 / 选区朗读")
+        .with_tooltip("本地语音 · 说话输入")
         .with_icon(Icon::from_rgba(rgba, 32, 32)?)
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
@@ -590,6 +644,7 @@ pub fn run() -> Result<()> {
     let weak = ui.as_weak();
     let sender = tx.clone();
     let settings_action = open_settings.clone();
+    let result_window = result.as_weak();
     let tray_presentation = presentation.clone();
     let mut last_visible = true;
     let mut last_tooltip = String::new();
@@ -633,13 +688,15 @@ pub fn run() -> Result<()> {
                         let _ = tray_presentation.show_ball();
                     }
                 }
-            } else if event.id == *read.id() {
-                let _ = sender.send(Event::ClipboardRead);
             } else if event.id == *setup.id() {
                 if weak.upgrade().is_some_and(|ui| ui.window().is_visible()) {
                     let _ = tray_presentation.show_ball();
                 }
                 settings_action();
+            } else if event.id == *latest.id() {
+                if let Some(result) = result_window.upgrade() {
+                    let _ = show_settings(result.window());
+                }
             } else if event.id == *quit.id() {
                 let _ = sender.send(Event::Quit);
                 let _ = slint::quit_event_loop();
@@ -665,8 +722,9 @@ pub fn run() -> Result<()> {
         let shared = shared.clone();
         let weak = ui.as_weak();
         let sw = settings.as_weak();
+        let rw = result.as_weak();
         let sender = tx.clone();
-        thread::spawn(move || controller(config, shared, weak, sw, sender, rx));
+        thread::spawn(move || controller(config, shared, weak, sw, rw, sender, rx));
     }
     let mut floating = FloatingState::default();
     let weak = ui.as_weak();
@@ -751,11 +809,82 @@ pub(crate) fn set_compact(ui: &VoiceWindow, compact: bool) {
     repaint_complete(ui.window());
 }
 
+pub(crate) fn set_output(ui: &slint::Weak<VoiceWindow>, mode: &str) {
+    let mode = mode.to_owned();
+    let _ = ui.upgrade_in_event_loop(move |ui| ui.set_output_mode(mode.into()));
+}
+
+pub(crate) fn set_result_output(window: &slint::Weak<ResultWindow>, mode: &str) {
+    let mode = mode.to_owned();
+    let _ = window.upgrade_in_event_loop(move |window| window.set_output_mode(mode.into()));
+}
+
+fn refresh_text_status(window: slint::Weak<SettingsWindow>, config: Config) {
+    thread::spawn(move || {
+        let status = crate::service::text_status(&config);
+        let _ = window.upgrade_in_event_loop(move |window| {
+            if window.get_text_busy() {
+                return;
+            }
+            match status {
+                Ok(status) => {
+                    window.set_text_installed(status.installed);
+                    window.set_text_ready(status.ready);
+                    window.set_text_status(status.message.into());
+                }
+                Err(error) => {
+                    window.set_text_ready(false);
+                    window.set_text_status(format!("整理状态暂不可用：{error}").into());
+                }
+            }
+        });
+    });
+}
+
+pub(crate) fn set_latest(
+    window: &slint::Weak<ResultWindow>,
+    original: String,
+    result: String,
+    notice: String,
+    retryable: bool,
+) {
+    let _ = window.upgrade_in_event_loop(move |window| {
+        window.set_original(original.into());
+        window.set_result(result.into());
+        window.set_notice(notice.into());
+        window.set_retryable(retryable);
+        window.set_processing(false);
+    });
+}
+
+pub(crate) fn set_result_busy(window: &slint::Weak<ResultWindow>, busy: bool) {
+    let _ = window.upgrade_in_event_loop(move |window| window.set_processing(busy));
+}
+
+pub(crate) fn show_latest(window: &slint::Weak<ResultWindow>, activate: bool) {
+    let _ = window.upgrade_in_event_loop(move |window| {
+        let _ = show_result(window.window(), activate);
+    });
+}
+
+pub(crate) fn show_result(window: &slint::Window, activate: bool) -> Result<()> {
+    if activate {
+        show_settings(window)
+    } else {
+        show_complete(window)
+    }
+}
+
 pub(crate) fn show_panel(ui: &VoiceWindow) -> Result<()> {
-    ui.set_animation_enabled(true);
     set_compact(ui, false);
+    show_floating(ui)
+}
+
+fn show_floating(ui: &VoiceWindow) -> Result<()> {
+    ui.set_animation_enabled(true);
     show_complete(ui.window())?;
     ui.window().with_winit_window(|w| {
+        w.set_window_level(winit::window::WindowLevel::AlwaysOnTop);
         if let Ok(handle) = w.window_handle() {
             if let RawWindowHandle::Win32(h) = handle.as_raw() {
                 native::floating(HWND(h.hwnd.get() as *mut _));
@@ -795,6 +924,7 @@ impl FloatingState {
             if self.initialized != Some(h.hwnd.get()) {
                 let first = self.initialized.is_none();
                 self.initialized = Some(h.hwnd.get());
+                w.set_window_level(winit::window::WindowLevel::AlwaysOnTop);
                 native::floating(hwnd);
                 if first {
                     if let Some(monitor) = w.current_monitor() {

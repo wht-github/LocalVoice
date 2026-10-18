@@ -1,18 +1,31 @@
-# 本地语音：Qwen ASR + SenseVoice
+# 本地语音输入
 
-Windows 原生 Rust + Slint 悬浮窗，提供三种识别模型：
+Windows 原生 Rust + Slint 悬浮球，用本地模型完成识别、日常轻整理和笔记正文输入。**v0.4.0 的运行与安装流程不需要 Python、pip、uv、PyTorch 或 WSL。** [下载与版本说明](https://github.com/wht-github/LocalVoice/releases/tag/v0.4.0)。
 
-| 设置项 | 推理方式 | 用途 |
+| 功能 | 当前实现 | 资源策略 |
 | --- | --- | --- |
-| Qwen ASR 1.7B Q8 | 官方 llama.cpp，NVIDIA CUDA | 日常听写 |
-| Qwen ASR 0.6B Q8 | 官方 llama.cpp，NVIDIA CUDA | 较小的模型和显存占用 |
-| SenseVoice CPU | FunASR，CPU 版 PyTorch | 无需独立显卡 |
+| 人声检测 | Silero VAD，经 sherpa-onnx / ONNX Runtime | 629 KiB 模型，CPU 单线程，录音时加载 |
+| 中英混合识别 | Qwen ASR 1.7B / 0.6B Q8，llama.cpp CUDA | 一次加载一个识别模型 |
+| CPU 识别 | SenseVoice INT8，经 sherpa-onnx | 无需独立显卡，无 Python |
+| 轻整理、笔记 | AgenticASR-Refiner Q4_K_M，llama.cpp CPU | 688 MB 权重，4 线程，4096 上下文，空闲 60 秒卸载 |
+| 界面与输入 | Rust + Slint、CPAL、Windows UI Automation | 原生窗口，无 WebView |
 
-三种模式共用一个 Python 服务环境，一次加载一种模型。Qwen 使用官方 GGUF Q8 文本权重与 BF16 音频编码器，llama.cpp 使用官方 v0.4.0 对应的 **b10809 Windows CUDA 13.3 x64 预编译包**。不需要编译 llama.cpp，也不需要 CUDA Toolkit、CUDA PyTorch 或 WSL 来做识别。
+Qwen 和 Agentic 由 Rust 直接启动独立 llama.cpp 进程，使用私有随机回环端口；切换、停止和退出仅清理本应用拥有的模型。SenseVoice 与 Silero 直接在客户端内运行。具体结构及验证见 [原生运行说明](docs/native-runtime.md)。
+
+## 使用方式
+
+- **Ctrl+Alt+Space** 开始／结束录音。日常输入和笔记始终由你手动结束，完成识别和整理后自动输入。等待期间目标发生变化时保留结果供复制。
+- **原样转写**保留口述；**日常输入**做轻整理；**笔记**整理连贯完整正文，不以摘要为目标。模型仍可能改错数字或术语，最近结果保留完整原文供核对、复制或重新整理。
+- 默认不开启停顿提交。可在设置勾选“连续听写（仅原样转写，停顿后输入）”；日常输入和笔记继续手动结束。
+- Silero 用人声模型代替固定音量门限，不再先按音量丢掉轻声。手动录音保留内部停顿，首音前留 400 ms 缓冲，末尾保留约 250 ms。VAD 不是降噪器，真实轻声、键盘声和房间噪声仍需实际试用。
+- 笔记默认不弹对照窗口；设置中可开关“笔记完成后显示对照窗口（调试）”。这不影响自动输入，也可随时打开“最近结果”。
+- 悬浮球与操作面板置顶、不抢输入焦点；托盘可找回窗口、打开设置或退出。
+
+无需维护词表即可使用。可选专名只供 Qwen 识别参考，Agentic 不用词表替换正文。文字整理使用原作者协议，不为固定例句追加纠错规则；失败、超长或输出截断时回退完整转写。
 
 ## 安装与启动
 
-前置：Windows x64、Git、PowerShell 7，以及用户自行准备的 uv 和 Python 3.12。默认安装预编译 Slint Release，完整步骤见 [install.md](install.md)。
+在 Windows x64 的 PowerShell 7 中执行：
 
 ```powershell
 git clone https://github.com/wht-github/LocalVoice.git
@@ -21,50 +34,40 @@ cd LocalVoice
 ./desktop.ps1
 ```
 
-无 NVIDIA 显卡可用 `./install.ps1 -CpuOnly` 只安装 SenseVoice。
+默认安装校验过的预编译 Release，已有 Qwen、Agentic 权重会复用。无 NVIDIA 显卡可用 `./install.ps1 -CpuOnly`。源码构建使用 `./install.ps1 -LocalBuild`，需要 Rust MSVC 和 Visual Studio C++ 构建工具；随后用 `./desktop.ps1 -LocalBuild` 启动。**普通安装不需要这些开发工具或 Python**。详细升级步骤见 [install.md](install.md)。
 
-已有安装只需 `./desktop.ps1`。在设置中选择模型并保存，客户端负责停止旧模型、加载新模型。默认新配置使用 SenseVoice CPU，朗读关闭；保存过的模型选择和其他偏好继续生效。
+打开设置选择识别模型。Agentic 缺失时，点击“下载并准备整理模型”才会下载；后续可离线使用。日常与笔记共用权重，按需加载，空闲释放。前轮本机整理模型工作集约 1.20 GiB，模型文件大小不等于运行内存；新的原生回环结果见验证报告。
 
-- **Ctrl+Alt+Space**：开始／结束听写；可在设置中开启连续听写。
-- 悬浮球用无文字动效显示收音状态；单击打开操作面板，拖动调整位置。面板离开后自动收回，待复制文字保留显示；托盘左键可找回悬浮球。
-- 退出客户端会停止它启动的识别进程，隐藏到托盘则继续运行。
-- 日志：`.runtime/native-asr.log`；设置：同目录 `settings.json`。
+停止全部模型或退出客户端会释放本版本的模型。旧版客户端及其 Python 服务需要从旧版托盘退出；新版不会接管或结束其他进程。不要同时运行两个客户端，以免快捷键冲突或同时占用识别模型显存。
 
-安装细节与故障排查见 [模型部署](docs/qwen-llama-desktop.md)，窗口操作与验证见 [桌面客户端](desktop/README.md)。
-
-## 文件与环境
+## 文件与数据
 
 | 位置 | 内容 |
 | --- | --- |
-| `.venv` | 共用服务环境，SenseVoice CPU PyTorch + llama HTTP 适配器 |
-| `.runtime/llama` | 官方 llama.cpp EXE、配套 CUDA DLL、版本记录 |
-| `.runtime/models/Qwen3-ASR-{大小}-GGUF` | 两个 Qwen 模型各自的 Q8 权重和 BF16 音频编码器 |
-| `.runtime/cache/huggingface` | SenseVoiceSmall 模型，安装时下载 |
-| `.runtime/desktop` | 下载的 Slint Release 悬浮窗 |
+| `desktop/src` | 录音、VAD、识别、整理、输入和原生模型生命周期 |
+| `.runtime/settings.json` | 模型、模式、快捷键、麦克风及界面偏好 |
+| `.runtime/models/silero-vad` | 轻量人声检测权重 |
+| `.runtime/models/sensevoice-int8` | 原生 CPU 识别权重 |
+| `.runtime/models/Qwen3-ASR-*-GGUF` | Qwen Q8 权重、BF16 音频编码器 |
+| `.runtime/models/AgenticASR-Refiner-GGUF` | 文字整理权重 |
+| `.runtime/llama`、`.runtime/llama-cpu` | 官方 llama.cpp 及配套 DLL |
+| `desktop/target/release` | 本地构建的 EXE、sherpa 和 ONNX Runtime DLL |
+| `.runtime/native-asr.log`、`.runtime/native-text.log` | 模型进程诊断日志 |
 
-下载脚本固定版本并校验 SHA256。升级 llama.cpp 时明确更新版本与校验值，再运行三模型验收，避免启动时自动更新。
+录音和转写不自动保存，最近结果仅保留在内存中。历史 Python 服务、下载脚本和评测代码保留用于研究复现，**不参与新版启动、录音、识别或整理**。旧的 8001 HTTP API 不是当前应用接口。
 
-## 本机 API
-
-- `GET http://127.0.0.1:8001/health`：模型、设备、ready 状态。
-- `POST http://127.0.0.1:8001/v1/audio/transcriptions`：multipart `file`，`language=auto/zh/en`。
-- 单次不超过 30 秒、20 MiB，支持 WAV/FLAC/OGG；忙碌时返回 429。
-
-客户端处理麦克风、分段与输入文字；服务返回完整转写。录音和转写不会自动保存。
-
-## 可选朗读
-
-现有 MeloTTS 朗读仍可在设置中开启，使用专用 LocalVoice WSL 环境；它与上述识别部署独立，默认关闭。保留 `voice.ps1` 和相关 TTS 安装文件以维护现有功能，详见 [朗读部署记录](docs/melo-and-service-control.md)。`voice.ps1` 管理 WSL 服务，不是 Windows 识别的启动入口。
-
-## 验证与历史
+## 验证
 
 ```powershell
-# 先退出日常悬浮窗，释放 8001 端口
-./.runtime/desktop/local-voice-desktop.exe --asr-models-check tests/fixtures/ascend-01219.wav outputs/asr-models-check.json
+cargo test --manifest-path desktop/Cargo.toml --locked
+./desktop/target/release/local-voice-desktop.exe --vad-check outputs/native-vad-check.json
+./desktop/target/release/local-voice-desktop.exe --native-smoke tests/fixtures/ascend-01219.wav outputs/native-smoke.json
 ```
 
-该检查通过实际桌面管理路径切换 CPU → 0.6B → 1.7B → CPU，验证转写和停止，不录音、不输入文字。公开样例出处见 [样例说明](tests/fixtures/README.md)。它是部署检查，不是准确率 benchmark。
+VAD 检查比较真实公开语音、合成衰减、静音和合成噪声，并与旧 RMS 门限对照。原生回环检查使用公开录音，验证 SenseVoice、Qwen 0.6B、Agentic 和进程退出；不采集麦克风、不输入外部应用。这些是回归与部署检查，不是准确率排名；自然轻声和实际应用输入需结合试用验证。
 
-原 PyTorch／TileLang、量化及 Nsight 实验已从当前工作目录移除，保存在 Git 标签 `archive/asr-optimization-20260913`（提交 `a17b0a46`）。例如 `git show archive/asr-optimization-20260913:docs/qwen-asr-nsight.md` 可查看当时报告；旧报告中的耗时不代表当前官方版本。
+窗口及其他开发检查见 [桌面说明](desktop/README.md)。产品方向见 [产品规划](docs/product-roadmap.md)，历史模型比较见 [口述评测](docs/dictation-evaluation.md) 与 [识别引擎选型](docs/asr-engine-selection.md)。
+
+原 PyTorch / TileLang / Nsight 实验位于 Git 标签 `archive/asr-optimization-20260913`。可选 TTS 已移除，相关记录保留在历史提交。
 
 [![Made with Slint](https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-whitebg.png)](https://slint.dev)

@@ -1,19 +1,21 @@
-import { VerticalBox, HorizontalBox, LineEdit, ComboBox, Button, Slider, CheckBox } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, LineEdit, ComboBox, Button, CheckBox, TextEdit, ScrollView } from "std-widgets.slint";
 component Action inherits Rectangle {
     in property <string> label;
     in property <bool> accent: false;
+    in property <bool> enabled: true;
     callback clicked;
     height: 32px;
     width: 66px;
     border-radius: 9px;
+    opacity: root.enabled ? 1 : 0.45;
     background: touch.pressed ? #406a5b : (touch.has-hover ? #355448 : (root.accent ? #30654e : #263e35));
     Text {text: root.label; color: #ecf7ef; font-size: 12px; horizontal-alignment: center; vertical-alignment: center;}
-    touch := TouchArea { clicked => {root.clicked();} }
+    touch := TouchArea { enabled: root.enabled; clicked => {root.clicked();} }
 }
 export component VoiceWindow inherits Window {
     title: "Local Voice";
     width: root.compact ? 64px : 380px;
-    height: root.compact ? 64px : (root.has-pending ? 138px : 102px);
+    height: root.compact ? 64px : (root.has-pending ? 202px : 166px);
     no-frame: true;
     always-on-top: true;
     background: root.compact ? transparent : #172522;
@@ -21,17 +23,18 @@ export component VoiceWindow inherits Window {
     in property <string> status: "正在连接语音服务…";
     in property <bool> recording: false;
     in property <bool> capturing: false;
+    in property <bool> processing: false;
+    in property <string> output-mode: "raw";
     in property <bool> compact: false;
     in property <bool> animation-enabled: true;
-    in property <bool> speaking: false;
-    in property <bool> tts-enabled: true;
     in property <bool> has-pending: false;
     in property <float> level: 0;
     callback record;
-    callback read;
     callback cancel;
     callback copy;
     callback settings;
+    callback select-output(string);
+    callback show-result;
     callback collapse-window;
     callback expand-window;
     callback drag;
@@ -96,7 +99,7 @@ export component VoiceWindow inherits Window {
         HorizontalLayout {
             spacing: 8px;
             Rectangle {
-                width: 97px;
+                width: 163px;
                 HorizontalLayout {
                     spacing: 7px;
                     Rectangle {width: 6px; height: 6px; y: 13px; border-radius: 3px; background: root.capturing ? #99dfb0 : #7c9b8b;}
@@ -104,9 +107,19 @@ export component VoiceWindow inherits Window {
                 }
             }
             Action {label: root.recording ? "结束说话" : "开始说话"; accent: true; clicked => {root.record();}}
-            Action {label: root.speaking ? "停止朗读" : (root.tts-enabled ? "朗读" : "朗读已关"); clicked => {root.read();}}
             Action {width: 35px; label: "设置"; clicked => {root.settings();}}
             Action {width: 35px; label: "收起"; clicked => {root.collapse-window();}}
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Action {width: 86px; height: 28px; label: "原样转写"; accent: root.output-mode == "raw"; enabled: !root.recording && !root.processing; clicked => {root.select-output("raw");}}
+            Action {width: 86px; height: 28px; label: "日常输入"; accent: root.output-mode == "clean"; enabled: !root.recording && !root.processing; clicked => {root.select-output("clean");}}
+            Action {width: 54px; height: 28px; label: "笔记"; accent: root.output-mode == "notes"; enabled: !root.recording && !root.processing; clicked => {root.select-output("notes");}}
+            Action {width: 100px; height: 28px; label: "最近结果"; clicked => {root.show-result();}}
+        }
+        Text {
+            text: root.output-mode == "raw" ? "原样转写 · 保留口吻，直接输入" : (root.output-mode == "clean" ? "日常输入 · 手动结束后轻整理并输入" : "笔记 · 手动结束后整理正文并输入");
+            color: #adc4b7; font-size: 11px;
         }
         Rectangle {height: 2px; background: #304039; Rectangle {width: parent.width * root.level; background: #9bd6b1;}}
         HorizontalLayout {
@@ -121,54 +134,145 @@ export component VoiceWindow inherits Window {
     }
 }
 export component SettingsWindow inherits Window {
-    title: "Local Voice settings";
-    width: 450px;
-    height: 640px;
+    title: "Local Voice · 设置";
+    preferred-width: 560px;
+    preferred-height: 640px;
+    min-width: 420px;
+    min-height: 360px;
     default-font-family: "Microsoft YaHei UI";
     in-out property <string> record-key;
-    in-out property <string> read-key;
-    in-out property <string> asr-url;
     in-out property <int> asr-mode-index: 0;
     in property <[string]> asr-modes;
-    in-out property <string> tts-url;
     in-out property <int> microphone-index: 0;
     in-out property <bool> continuous-dictation: false;
-    in-out property <int> voice-index: 0;
-    in-out property <float> speed: 1;
+    in-out property <bool> show-note-preview: false;
     in property <[string]> microphones;
-    in property <[string]> voices;
     in property <string> error;
-    in-out property <bool> tts-enabled: true;
     in-out property <bool> auto-start-services: true;
     in property <bool> services-busy: false;
     in property <string> service-status: "服务尚未检查";
+    in-out property <string> terms-text;
+    in property <bool> text-busy: false;
+    in property <bool> text-installed: false;
+    in property <bool> text-ready: false;
+    in property <string> app-version;
+    in property <string> text-status: "正在检查整理模型…";
+    in-out property <length> content-scroll-y;
+    out property <length> content-scroll-range: max(0px, content.viewport-height - content.visible-height);
     callback start-services;
     callback stop-services;
+    callback prepare-text;
     callback save;
     callback close-settings;
     VerticalBox {
-        padding: 24px;
-        spacing: 7px;
-        Text {text: "语音设置"; font-size: 21px; font-weight: 600;}
-        CheckBox {text: "打开应用时自动启动语音服务"; checked <=> root.auto-start-services;}
-        CheckBox {text: "启用朗读（关闭并保存后释放模型内存）"; checked <=> root.tts-enabled;}
-        HorizontalLayout {spacing: 12px;
-            Button {text: "启动已保存的服务"; enabled: !root.services-busy; clicked => {root.start-services();}}
-            Button {text: "停止全部服务"; enabled: !root.services-busy; clicked => {root.stop-services();}}
+        padding: 20px;
+        spacing: 10px;
+        HorizontalLayout {
+            Text {text: "语音设置"; font-size: 21px; font-weight: 600;}
+            Text {text: root.app-version; font-size: 11px; color: #68756d; horizontal-alignment: right; vertical-alignment: center;}
         }
-        Text {text: root.service-status; font-size: 11px; wrap: word-wrap; color: #68756d;}
-        HorizontalLayout { Text {text: "识别模型"; width: 90px;} ComboBox {model: root.asr-modes; current-index <=> root.asr-mode-index;} }
-        Text {text: "识别在 Windows 本机运行；更换模型并保存后重新加载。"; font-size: 12px; wrap: word-wrap;}
-        HorizontalLayout { Text {text: "说话快捷键"; width: 90px;} LineEdit {text <=> root.record-key;} }
-        HorizontalLayout { Text {text: "朗读快捷键"; width: 90px;} LineEdit {text <=> root.read-key;} }
-        CheckBox {text: "连续听写（停顿后输入，直到手动停止）"; checked <=> root.continuous-dictation;}
-        HorizontalLayout { Text {text: "麦克风"; width: 90px;} ComboBox {model: root.microphones; current-index <=> root.microphone-index;} }
-        HorizontalLayout { Text {text: "朗读音色"; width: 90px;} ComboBox {model: root.voices; current-index <=> root.voice-index;} }
-        HorizontalLayout { Text {text: "语速 " + round(root.speed*100) + "%"; width: 90px;} Slider {minimum: 0.5; maximum: 1.5; value <=> root.speed;} }
-        HorizontalLayout { Text {text: "识别服务"; width: 90px;} LineEdit {text <=> root.asr-url;} }
-        HorizontalLayout { Text {text: "朗读服务"; width: 90px;} LineEdit {text <=> root.tts-url;} }
-        Text {text: "声音使用 Windows 当前默认输出设备。"; font-size: 11px; color: #68756d;}
+        content := ScrollView {
+            horizontal-scrollbar-policy: always-off;
+            viewport-y <=> root.content-scroll-y;
+            VerticalBox {
+                padding: 0px;
+                padding-right: 12px;
+                spacing: 10px;
+                Text {text: "识别与录音"; font-size: 15px; font-weight: 600;}
+                HorizontalLayout { Text {text: "识别模型"; width: 90px;} ComboBox {model: root.asr-modes; current-index <=> root.asr-mode-index;} }
+                Text {text: "技术口述可优先试用 Qwen 1.7B；请根据自己的中英术语识别效果选择。"; font-size: 12px; wrap: word-wrap;}
+                HorizontalLayout { Text {text: "说话快捷键"; width: 90px;} LineEdit {text <=> root.record-key;} }
+                CheckBox {text: "连续听写（仅原样转写，停顿后输入）"; checked <=> root.continuous-dictation;}
+                Text {text: "日常输入和笔记始终手动结束录音，不改变上面的连续听写偏好。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                HorizontalLayout { Text {text: "麦克风"; width: 90px;} ComboBox {model: root.microphones; current-index <=> root.microphone-index;} }
+                Text {text: "Silero 人声检测 · 本地 CPU 单线程。减少噪声误触发，保留说话首尾和句间停顿；不会自动结束日常输入或笔记。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                Rectangle {height: 1px; background: #dce3de;}
+                Text {text: "口语整理与笔记"; font-size: 15px; font-weight: 600;}
+                Text {text: "Agentic · 约 688 MB，CPU 本地处理。首次准备后可离线使用；空闲 60 秒释放模型内存，下次整理自动加载。"; font-size: 12px; wrap: word-wrap;}
+                Text {text: "日常输入和笔记均在结束录音后整理并自动输入；笔记保留完整正文。数字改口和专业术语仍需核对。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                CheckBox {text: "笔记完成后显示对照窗口（调试）"; checked <=> root.show-note-preview;}
+                Text {text: "只控制额外显示原文与整理结果，不影响自动输入；关闭后仍可从「最近结果」查看。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                Button {text: root.text-busy ? "正在准备整理模型…" : (root.text-ready ? "整理模型已就绪" : (root.text-installed ? "预加载整理模型" : "下载并准备整理模型")); enabled: !root.text-busy && !root.services-busy && !root.text-ready; clicked => {root.prepare-text();}}
+                Text {text: root.text-status; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                Rectangle {height: 1px; background: #dce3de;}
+                Text {text: "本地模型"; font-size: 15px; font-weight: 600;}
+                CheckBox {text: "打开应用时自动加载识别模型"; checked <=> root.auto-start-services;}
+                Text {text: "应用直接管理原生模型，无需 Python 环境。停止模型或退出应用会释放所加载的资源。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                HorizontalLayout {spacing: 12px;
+                    Button {text: "加载已选模型"; enabled: !root.services-busy; clicked => {root.start-services();}}
+                    Button {text: "停止全部模型"; enabled: !root.services-busy; clicked => {root.stop-services();}}
+                }
+                Text {text: root.service-status; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                Rectangle {height: 1px; background: #dce3de;}
+                Text {text: "可选专名"; font-size: 15px; font-weight: 600;}
+                Text {text: "无需填写即可使用；需要时补充项目专名，每行一个规范词。"; font-size: 12px; wrap: word-wrap;}
+                TextEdit {text <=> root.terms-text; min-height: 150px; max-height: 150px; wrap: word-wrap; placeholder-text: "可留空；需要时再补充项目或产品专名";}
+                Text {text: "仅 Qwen 识别参考规范词；SenseVoice 和 Agentic 整理不使用。最多 64 条，清空并保存即可停用。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+            }
+        }
         Text {text: root.error; color: #a64232; font-size: 12px; wrap: word-wrap;}
         HorizontalLayout {spacing: 12px; Button {text: "取消"; clicked => {root.close-settings();}} Button {text: "保存"; clicked => {root.save();}} }
+    }
+}
+
+export component ResultWindow inherits Window {
+    title: "Local Voice · 最近结果";
+    preferred-width: 820px;
+    preferred-height: 780px;
+    min-width: 420px;
+    min-height: 380px;
+    default-font-family: "Microsoft YaHei UI";
+    in property <string> original;
+    in property <string> result;
+    in property <string> notice: "完成一次录音后，可在这里核对和复制完整结果。";
+    in property <bool> retryable: false;
+    in property <bool> processing: false;
+    in property <string> output-mode: "raw";
+    in-out property <length> content-scroll-y;
+    out property <length> content-scroll-range: max(0px, content.viewport-height - content.visible-height);
+    callback copy-original;
+    callback copy-result;
+    callback retry-text;
+    callback select-output(string);
+    callback close-result;
+    VerticalBox {
+        padding: 20px;
+        spacing: 10px;
+        Text {text: "最近结果"; font-size: 21px; font-weight: 600;}
+        Text {text: root.notice; wrap: word-wrap; font-size: 12px; color: #586b5f;}
+        HorizontalLayout {
+            Text {text: "重新处理"; font-size: 12px; vertical-alignment: center;}
+            ComboBox {
+                model: ["原样转写", "日常输入", "笔记（正文）"];
+                current-index: root.output-mode == "clean" ? 1 : (root.output-mode == "notes" ? 2 : 0);
+                enabled: !root.processing;
+                selected(value) => {root.select-output(self.current-index == 1 ? "clean" : (self.current-index == 2 ? "notes" : "raw"));}
+            }
+            Button {text: root.processing ? "正在处理…" : "按当前模式重新整理"; enabled: root.retryable && !root.processing && root.output-mode != "raw"; clicked => {root.retry-text();}}
+        }
+        content := ScrollView {
+            horizontal-scrollbar-policy: always-off;
+            viewport-y <=> root.content-scroll-y;
+            VerticalBox {
+                padding: 0px;
+                padding-right: 12px;
+                spacing: 10px;
+                HorizontalLayout {
+                    Text {text: "完整正文"; font-size: 14px; font-weight: 600; vertical-alignment: center;}
+                    Button {text: "复制结果"; enabled: root.result != ""; clicked => {root.copy-result();}}
+                }
+                TextEdit {text: root.result; read-only: true; wrap: word-wrap; height: max(180px, (root.height - 270px) / 2); placeholder-text: "完整结果会显示在这里";}
+                HorizontalLayout {
+                    Text {text: "原始转写"; font-size: 14px; font-weight: 600; vertical-alignment: center;}
+                    Button {text: "复制原文"; enabled: root.original != ""; clicked => {root.copy-original();}}
+                }
+                TextEdit {text: root.original; read-only: true; wrap: word-wrap; height: max(180px, (root.height - 270px) / 2); placeholder-text: "原始转写会完整保留";}
+            }
+        }
+        Text {text: "重新整理只更新此窗口，不会再次输入。仅保留最近一次结果，退出后清空；两份正文均可滚动阅读或完整复制。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+        HorizontalLayout {
+            spacing: 12px;
+            Button {text: "关闭"; clicked => {root.close-result();}}
+        }
     }
 }

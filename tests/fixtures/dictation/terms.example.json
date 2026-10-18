@@ -1,0 +1,12 @@
+[
+  {"text": "AGV", "aliases": [], "description": "用户工作中的技术名称；保持缩写，不自行展开。"},
+  {"text": "blueprint", "aliases": [], "description": "用户使用的英文术语；保持原词，不擅自译成中文。"},
+  {"text": "UE", "aliases": [], "description": "Unreal Engine 的缩写。"},
+  {"text": "Unreal", "aliases": [], "description": "用户工作中的引擎名称。"},
+  {"text": "shader", "aliases": [], "description": "着色器，用户希望保留英文词形。"},
+  {"text": "model", "aliases": [], "description": "保留用户所说的英文术语。"},
+  {"text": "transition", "aliases": [], "description": "用户描述运动变化时使用的术语。"},
+  {"text": "attention", "aliases": [], "description": "注意力算子。"},
+  {"text": "KV cache", "aliases": ["key value cache"], "description": "推理时保存 key/value 的缓存。"},
+  {"text": "FlashAttention", "aliases": ["flash attention"], "description": "注意力计算实现名称。"}
+]

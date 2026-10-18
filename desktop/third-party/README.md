@@ -6,6 +6,9 @@ source. Most sources use the commit recorded in the crate's `.cargo_vcs_info.jso
 The simd_helpers 0.1.0 source commit predates its LICENSE file, so that directory
 includes the license subsequently published by its upstream project.
 
-`scripts/package-desktop.py` uses the license files bundled with each Cargo crate
+`scripts/package-desktop.ps1` uses the license files bundled with each Cargo crate
 first, and falls back to these copies only when the crate has none. They are
 third-party notices, not a license for LocalVoice's own code.
+
+`native-speech/` contains the notices for the shared sherpa-onnx and ONNX Runtime
+libraries, which are bundled alongside the desktop executable.

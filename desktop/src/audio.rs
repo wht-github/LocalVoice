@@ -1,13 +1,17 @@
-use crate::{Event, config::Config};
-use anyhow::{Result, anyhow, bail};
+use crate::{
+    Event,
+    config::Config,
+    vad::{self, Detector, FRAME_SIZE, Resampler, SAMPLE_RATE},
+};
+use anyhow::{Context, Result, anyhow, bail};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
     collections::VecDeque,
     io::Cursor,
     sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc::Sender,
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, Sender, TrySendError},
     },
     thread,
     time::{Duration, Instant},
@@ -66,45 +70,57 @@ fn capture(
     let supported = device.default_input_config()?;
     let rate = supported.sample_rate().0;
     let channels = supported.channels() as usize;
-    let segmenter = Arc::new(Mutex::new(Segmenter::new(
+    let model = crate::paths::runtime()?.join("models/silero-vad/silero_vad.onnx");
+    let mut processor = Processor::new(
         rate,
-        config.speech_threshold,
         config.continuous_dictation.then_some(config.silence_ms),
-    )));
+        &model,
+    )?;
+    let (sender, receiver) = mpsc::sync_channel(64);
+    let callbacks = Arc::new(AtomicUsize::new(0));
+    let overflow = Arc::new(AtomicBool::new(false));
     let stream_config: cpal::StreamConfig = supported.clone().into();
     macro_rules! stream {
         ($sample:ty, $convert:expr) => {{
-            let state = segmenter.clone();
-            let out = events.clone();
-            let failed = events.clone();
+            let input = sender.clone();
+            let failed = sender.clone();
             let stopped = stop.clone();
-            let should_flush = flush.clone();
+            let active = callbacks.clone();
+            let full = overflow.clone();
+            let failed_full = overflow.clone();
+            let failed_stop = stop.clone();
             device.build_input_stream(
                 &stream_config,
                 move |data: &[$sample], _| {
-                    let Ok(mut state) = state.lock() else { return };
                     if stopped.load(Ordering::SeqCst) {
                         return;
                     }
-                    for frame in data.chunks_exact(channels) {
-                        let mono = frame.iter().map($convert).sum::<f32>() / channels as f32;
-                        for item in state.push(mono) {
-                            let event = match item {
-                                Piece::Limit => {
-                                    should_flush.store(false, Ordering::SeqCst);
-                                    stopped.store(true, Ordering::SeqCst);
-                                    Event::CaptureError(generation, "录音已达到内存容量上限，请缩短录音后重试".into())
-                                }
-                                Piece::Level(level) => Event::Level(generation, level),
-                                Piece::Audio(samples) => Event::Audio(generation, samples, rate, Instant::now()),
-                            };
-                            let _ = out.send(event);
+                    active.fetch_add(1, Ordering::SeqCst);
+                    // The second check pairs with the worker's stop barrier.
+                    if !stopped.load(Ordering::SeqCst) {
+                        let mono = data
+                            .chunks_exact(channels)
+                            .map(|frame| {
+                                let value =
+                                    frame.iter().map($convert).sum::<f32>() / channels as f32;
+                                if value.is_finite() { value } else { 0. }
+                            })
+                            .collect();
+                        if matches!(
+                            input.try_send(Input::Audio(mono)),
+                            Err(TrySendError::Full(_))
+                        ) {
+                            full.store(true, Ordering::SeqCst);
+                            stopped.store(true, Ordering::SeqCst);
                         }
-                        if stopped.load(Ordering::SeqCst) { break; }
                     }
+                    active.fetch_sub(1, Ordering::SeqCst);
                 },
                 move |error| {
-                    let _ = failed.send(Event::CaptureError(generation, error.to_string()));
+                    if failed.try_send(Input::Error(error.to_string())).is_err() {
+                        failed_full.store(true, Ordering::SeqCst);
+                    }
+                    failed_stop.store(true, Ordering::SeqCst);
                 },
                 None,
             )?
@@ -118,14 +134,39 @@ fn capture(
     };
     stream.play()?;
     let _ = events.send(Event::CaptureStarted(generation));
+    let mut dispatch = |piece| {
+        let event = match piece {
+            Piece::Level(level) => Event::Level(generation, level),
+            Piece::Audio(samples) => Event::Audio(generation, samples, SAMPLE_RATE, Instant::now()),
+        };
+        let _ = events.send(event);
+    };
     while !stop.load(Ordering::SeqCst) {
-        thread::sleep(Duration::from_millis(20));
+        match receiver.recv_timeout(Duration::from_millis(20)) {
+            Ok(Input::Audio(samples)) => processor.push(&samples, false, &mut dispatch)?,
+            Ok(Input::Error(error)) => bail!("麦克风录音失败：{error}"),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
     }
-    // Flush the final captured samples before joining the WASAPI driver thread.
-    // Callbacks check stop under the same lock, so no samples arrive after flush.
+    // Let an already-running callback enqueue its tail. New callbacks see stop
+    // before admitting audio, so the queue is stable before it is drained.
+    while callbacks.load(Ordering::SeqCst) != 0 {
+        thread::yield_now();
+    }
+    if overflow.load(Ordering::SeqCst) {
+        bail!("音频处理未能跟上麦克风，已取消本次录音以避免漏字；请关闭高负载任务后重试");
+    }
     if flush.load(Ordering::SeqCst) {
-        if let Some(samples) = segmenter.lock().unwrap().finish() {
-            let _ = events.send(Event::Audio(generation, samples, rate, Instant::now()));
+        for input in receiver.try_iter() {
+            match input {
+                Input::Audio(samples) => processor.push(&samples, false, &mut dispatch)?,
+                Input::Error(error) => bail!("麦克风录音失败：{error}"),
+            }
+        }
+        processor.push(&[], true, &mut dispatch)?;
+        if let Some(samples) = processor.segmenter.finish() {
+            dispatch(Piece::Audio(samples));
         }
     }
     let _ = events.send(Event::CaptureStopped(generation));
@@ -144,109 +185,154 @@ fn capture(
 
 enum Piece {
     Audio(Vec<f32>),
-    Limit,
     Level(f32),
 }
-struct Segmenter {
+enum Input {
+    Audio(Vec<f32>),
+    Error(String),
+}
+
+struct Processor {
+    resampler: Resampler,
+    detector: Detector,
+    pending: Vec<f32>,
+    segmenter: Segmenter,
+    ticks: u32,
+}
+impl Processor {
+    fn new(rate: u32, silence_ms: Option<u32>, model: &std::path::Path) -> Result<Self> {
+        Ok(Self {
+            resampler: Resampler::new(rate, SAMPLE_RATE)?,
+            detector: Detector::new(model)?,
+            pending: Vec::new(),
+            segmenter: Segmenter::new(silence_ms),
+            ticks: 0,
+        })
+    }
+
+    fn push(&mut self, samples: &[f32], finish: bool, emit: &mut impl FnMut(Piece)) -> Result<()> {
+        self.pending.extend(self.resampler.process(samples, finish));
+        let pending = std::mem::take(&mut self.pending);
+        for chunk in pending.chunks(FRAME_SIZE) {
+            if chunk.len() < FRAME_SIZE && !finish {
+                self.pending.extend_from_slice(chunk);
+                break;
+            }
+            let mut frame = [0.; FRAME_SIZE];
+            frame[..chunk.len()].copy_from_slice(chunk);
+            let speech = self.detector.speech(&frame);
+            self.ticks += 1;
+            if self.ticks % 3 == 0 {
+                emit(Piece::Level((vad::rms(chunk) * 12.).min(1.)));
+            }
+            if let Some(audio) = self.segmenter.push(chunk, speech)? {
+                emit(Piece::Audio(audio));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Feed a fixture through the real capture pipeline without opening a microphone.
+pub fn offline_capture(
+    samples: &[f32],
     rate: u32,
-    frame: Vec<f32>,
+    silence_ms: Option<u32>,
+    model: &std::path::Path,
+) -> Result<Vec<Vec<f32>>> {
+    let mut processor = Processor::new(rate, silence_ms, model)?;
+    let mut parts = Vec::new();
+    let mut collect = |piece| {
+        if let Piece::Audio(audio) = piece {
+            parts.push(audio);
+        }
+    };
+    for block in samples.chunks((rate as usize / 100).max(1)) {
+        processor.push(block, false, &mut collect)?;
+    }
+    processor.push(&[], true, &mut collect)?;
+    if let Some(audio) = processor.segmenter.finish() {
+        parts.push(audio);
+    }
+    Ok(parts)
+}
+
+const PREROLL: usize = SAMPLE_RATE as usize * 400 / 1000;
+const TAIL: usize = SAMPLE_RATE as usize * 250 / 1000;
+const MAX_SAMPLES: usize = 64 * 1024 * 1024;
+const CONTINUOUS_LIMIT: usize = SAMPLE_RATE as usize * 25;
+
+struct Segmenter {
     preroll: VecDeque<f32>,
     samples: Vec<f32>,
-    quiet: u32,
-    voiced: u32,
-    threshold: f32,
-    ticks: u32,
-    silence_ms: Option<u32>,
+    quiet: usize,
+    silence_samples: Option<usize>,
     continuation: bool,
 }
 impl Segmenter {
-    fn new(rate: u32, threshold: f32, silence_ms: Option<u32>) -> Self {
+    fn new(silence_ms: Option<u32>) -> Self {
         Self {
-            rate,
-            frame: Vec::new(),
             preroll: VecDeque::new(),
             samples: Vec::new(),
             quiet: 0,
-            voiced: 0,
-            threshold,
-            ticks: 0,
-            silence_ms,
+            silence_samples: silence_ms.map(|ms| {
+                ms.saturating_sub(vad::HANGOVER_MS).max(32) as usize * SAMPLE_RATE as usize / 1000
+            }),
             continuation: false,
         }
     }
-    fn push(&mut self, sample: f32) -> Vec<Piece> {
-        self.frame
-            .push(if sample.is_finite() { sample } else { 0. });
-        if self.frame.len() < self.rate as usize / 50 {
-            return vec![];
-        }
-        let frame = std::mem::take(&mut self.frame);
-        let rms = (frame.iter().map(|s| s * s).sum::<f32>() / frame.len() as f32).sqrt();
-        let speech = rms >= self.threshold;
-        let mut out = Vec::new();
-        self.ticks += 1;
-        if self.ticks % 5 == 0 {
-            out.push(Piece::Level((rms * 12.).min(1.)));
-        }
-        if self.samples.is_empty() && !speech {
+    fn push(&mut self, frame: &[f32], speech: bool) -> Result<Option<Vec<f32>>> {
+        if self.samples.is_empty() && !speech && !self.continuation {
             self.preroll.extend(frame);
-            while self.preroll.len() > self.rate as usize / 5 {
+            while self.preroll.len() > PREROLL {
                 self.preroll.pop_front();
             }
-            return out;
+            return Ok(None);
         }
         if self.samples.is_empty() {
             self.samples.extend(self.preroll.drain(..));
         }
-        // Check before growth so Vec does not double capacity beyond this bound.
-        if self.samples.len() + frame.len() > 64 * 1024 * 1024 {
-            out.push(Piece::Limit);
-            return out;
+        if self.samples.len() + frame.len() > MAX_SAMPLES {
+            bail!("录音已达到内存容量上限，请缩短录音后重试");
         }
-        self.samples.extend(frame);
+        if self.samples.capacity() < self.samples.len() + frame.len() {
+            let capacity = (self.samples.capacity().max(SAMPLE_RATE as usize) * 2).min(MAX_SAMPLES);
+            self.samples
+                .try_reserve_exact(capacity - self.samples.len())
+                .context("录音内存不足，请缩短录音后重试")?;
+        }
+        self.samples.extend_from_slice(frame);
         if speech {
             self.quiet = 0;
-            self.voiced += 20;
         } else {
-            self.quiet += 20;
+            self.quiet += frame.len();
         }
-        // Only continuous sessions submit on pauses. Manual sessions retain
-        // every internal pause until the user's explicit stop.
-        if let Some(silence_ms) = self.silence_ms {
-            let limit = self.samples.len() >= self.rate as usize * 25;
-            if self.quiet >= silence_ms || limit {
+        // Manual notes keep every internal pause and every quiet word after
+        // onset. The model decides only the leading/trailing speech boundary.
+        if let Some(silence_samples) = self.silence_samples {
+            let limit = self.samples.len() >= CONTINUOUS_LIMIT;
+            if self.quiet >= silence_samples || limit {
                 let ongoing = limit && speech;
-                if let Some(data) = self.finish() {
-                    out.push(Piece::Audio(data));
-                }
+                let audio = self.finish();
                 self.continuation = ongoing;
+                return Ok(audio);
             }
         }
-        out
+        Ok(None)
     }
     fn finish(&mut self) -> Option<Vec<f32>> {
         let mut data = std::mem::take(&mut self.samples);
-        if !data.is_empty() {
-            data.append(&mut self.frame);
-        }
-        let valid = self.voiced >= 200 || (self.continuation && self.voiced > 0);
         self.continuation = false;
-        // Keep 150 ms trailing context; avoid a full silent tail in ASR input.
-        if self.quiet > 150 {
-            data.truncate(
-                data.len()
-                    .saturating_sub((self.quiet - 150) as usize * self.rate as usize / 1000),
-            );
+        if self.quiet > TAIL {
+            data.truncate(data.len().saturating_sub(self.quiet - TAIL));
         }
         self.quiet = 0;
-        self.voiced = 0;
-        valid.then_some(data)
+        (!data.is_empty()).then_some(data)
     }
 }
 
 pub fn encode_wav(samples: &[f32], rate: u32) -> Result<Vec<u8>> {
-    // Preserve the device sample rate. The existing ASR service performs proper
-    // anti-aliased resampling to 16 kHz, avoiding lossy client-side decimation.
+    // Preserve the supplied rate; capture already uses band-limited resampling.
     if rate == 0 {
         bail!("Invalid microphone sample rate");
     }
@@ -272,72 +358,83 @@ pub fn encode_wav(samples: &[f32], rate: u32) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn feed(s: &mut Segmenter, samples: &[f32], speech: bool) -> Vec<Vec<f32>> {
+        samples
+            .chunks(FRAME_SIZE)
+            .filter_map(|frame| s.push(frame, speech).unwrap())
+            .collect()
+    }
+
     #[test]
-    fn silence_is_not_transcribed_and_speech_tail_is_flushed() {
-        let mut s = Segmenter::new(16000, 0.008, None);
-        for _ in 0..32000 {
-            assert!(!s.push(0.).iter().any(|p| matches!(p, Piece::Limit)));
+    fn model_classification_controls_admission_instead_of_volume() {
+        let mut s = Segmenter::new(None);
+        feed(&mut s, &vec![0.2; 32000], false); // loud noise rejected by VAD
+        assert!(s.finish().is_none());
+        feed(&mut s, &vec![0.001; 8000], true); // quiet speech admitted by VAD
+        let audio = s.finish().unwrap();
+        assert_eq!(&audio[audio.len() - 8000..], &vec![0.001; 8000]);
+        assert!(s.finish().is_none());
+    }
+
+    #[test]
+    fn long_recording_and_pauses_are_kept_until_manual_finish() {
+        let mut s = Segmenter::new(None);
+        let mut source = vec![0.1; 16000 * 20];
+        source.extend(vec![0.001; 16000 * 4]);
+        source.extend(vec![0.2; 16000 * 28]);
+        assert!(feed(&mut s, &source[..16000 * 20], true).is_empty());
+        assert!(feed(&mut s, &source[16000 * 20..16000 * 24], false).is_empty());
+        assert!(feed(&mut s, &source[16000 * 24..], true).is_empty());
+        assert_eq!(s.finish().unwrap(), source);
+        assert!(s.finish().is_none());
+    }
+
+    #[test]
+    fn continuous_pauses_emit_several_utterances_and_stop_flushes_tail() {
+        let mut s = Segmenter::new(Some(700));
+        let mut parts = Vec::new();
+        for _ in 0..2 {
+            parts.extend(feed(&mut s, &vec![0.1; 16000], true));
+            parts.extend(feed(&mut s, &vec![0.; 16000], false));
         }
-        for n in 0..8000 {
-            s.push((n as f32 * 0.2).sin() * 0.15);
-        }
+        assert_eq!(parts.len(), 2);
+        assert!(parts.iter().all(|p| p.len() >= 16000 && p.len() < 32000));
+        assert!(s.finish().is_none());
+        feed(&mut s, &vec![0.1; 8000], true);
         assert!(s.finish().unwrap().len() >= 8000);
         assert!(s.finish().is_none());
     }
+
     #[test]
-    fn long_recording_and_pauses_are_kept_until_manual_finish() {
-        let mut s = Segmenter::new(16000, 0.008, None);
-        for n in 0..16000 * 52 {
-            let sample = if n > 16000 * 20 && n < 16000 * 24 {
-                0.
-            } else {
-                (n as f32 * 0.2).sin() * 0.15
-            };
-            assert!(s.push(sample).iter().all(|p| matches!(p, Piece::Level(_))));
-        }
-        assert_eq!(s.finish().unwrap().len(), 16000 * 52);
-        assert!(s.finish().is_none());
-    }
-    #[test]
-    fn continuous_pauses_emit_several_utterances_and_stop_flushes_tail() {
-        let mut s = Segmenter::new(16000, 0.008, Some(700));
-        let mut parts = Vec::new();
-        for _ in 0..2 {
-            for sample in std::iter::repeat_n(0.1, 16000).chain(std::iter::repeat_n(0., 16000)) {
-                for piece in s.push(sample) {
-                    if let Piece::Audio(audio) = piece {
-                        parts.push(audio);
-                    }
-                }
-            }
-        }
-        assert_eq!(parts.len(), 2);
+    fn continuous_long_speech_is_bounded_and_keeps_short_final_tail() {
+        let mut s = Segmenter::new(Some(700));
+        let source: Vec<_> = (0..16000 * 50 + 1000)
+            .map(|n| (n as f32 * 0.2).sin())
+            .collect();
+        let mut parts = feed(&mut s, &source, true);
+        parts.push(s.finish().unwrap());
+        assert_eq!(parts.len(), 3);
         assert!(
             parts
                 .iter()
-                .all(|p| p.len() >= 16000 && p.len() < 16000 * 2)
+                .all(|p| p.len() < CONTINUOUS_LIMIT + FRAME_SIZE)
         );
-        assert!(s.finish().is_none());
-        for _ in 0..8000 {
-            s.push(0.1);
-        }
-        assert!(s.finish().unwrap().len() >= 8000);
-        assert!(s.finish().is_none());
+        assert_eq!(parts.concat(), source);
     }
+
     #[test]
-    fn continuous_long_speech_is_bounded_and_keeps_short_final_tail() {
-        let mut s = Segmenter::new(16000, 0.008, Some(700));
-        let mut sizes = Vec::new();
-        for _ in 0..16000 * 50 + 1600 {
-            for piece in s.push(0.1) {
-                if let Piece::Audio(audio) = piece {
-                    sizes.push(audio.len());
-                }
-            }
-        }
-        sizes.push(s.finish().unwrap().len());
-        assert_eq!(sizes, vec![16000 * 25, 16000 * 25, 1600]);
+    fn speech_has_preroll_and_a_short_tail_without_trimming_internal_audio() {
+        let mut s = Segmenter::new(None);
+        feed(&mut s, &vec![0.001; 16000], false);
+        feed(&mut s, &vec![0.1; 8000], true);
+        feed(&mut s, &vec![0.; 16000], false);
+        let audio = s.finish().unwrap();
+        assert_eq!(audio.len(), PREROLL + 8000 + TAIL);
+        assert_eq!(&audio[..PREROLL], &vec![0.001; PREROLL]);
+        assert_eq!(&audio[PREROLL..PREROLL + 8000], &vec![0.1; 8000]);
     }
+
     #[test]
     fn wav_keeps_device_sample_rate_and_duration() {
         let bytes = encode_wav(&vec![0.1; 48000], 48000).unwrap();

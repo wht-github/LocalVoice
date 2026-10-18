@@ -1,123 +1,218 @@
+//! Native recognition and editing; the complete original survives any editor failure.
 use crate::config::Config;
 use anyhow::{Context, Result, bail};
-use reqwest::blocking::{Client, multipart};
-use serde::Deserialize;
-use std::{
-    io::Cursor,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-    thread,
-    time::{Duration, Instant},
-};
 
-pub fn client() -> Result<Client> {
-    Ok(Client::builder()
-        .no_proxy()
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(90))
-        .build()?)
+use std::{io::Cursor, sync::OnceLock, time::Instant};
+
+static EDITOR: OnceLock<crate::text::TextProcessor> = OnceLock::new();
+fn editor() -> Result<&'static crate::text::TextProcessor> {
+    let root = crate::paths::root()?;
+    Ok(EDITOR.get_or_init(|| crate::text::TextProcessor::new(root)))
 }
-#[derive(Deserialize)]
-pub struct Voice {
-    pub id: String,
-    pub language: String,
-    #[serde(default)]
-    pub name: String,
+pub(crate) fn stop_text() {
+    if let Some(editor) = EDITOR.get() {
+        editor.stop();
+    }
 }
-#[derive(Deserialize)]
-struct VoiceList {
-    voices: Vec<Voice>,
-}
-pub fn voices(config: &Config) -> Result<Vec<Voice>> {
-    Ok(client()?
-        .get(format!("{}/v1/audio/voices", config.tts_url))
-        .send()?
-        .error_for_status()?
-        .json::<VoiceList>()?
-        .voices)
+pub(crate) fn shutdown_text() {
+    if let Some(editor) = EDITOR.get() {
+        editor.shutdown();
+    }
 }
 pub fn ready(config: &Config) -> Result<()> {
-    let client = client()?;
-    let mut urls = vec![&config.asr_url];
-    if config.tts_enabled {
-        urls.push(&config.tts_url);
-    }
-    for url in urls {
-        let value: serde_json::Value = client
-            .get(format!("{url}/health"))
-            .send()?
-            .error_for_status()?
-            .json()?;
-        if value["ready"] != true {
-            bail!("模型仍在加载");
-        }
-        if url == &config.asr_url
-            && crate::runtime::managed(config)
-            && value["mode"] != config.asr_mode
-        {
-            bail!("当前识别服务与已保存模型不一致，请启动已保存的服务");
-        }
-    }
-    Ok(())
+    crate::runtime::ready(config)
 }
-pub fn transcribe(client: &Client, config: &Config, wav: Vec<u8>) -> Result<String> {
-    Ok(transcribe_timed(client, config, wav)?.text)
-}
+
+#[derive(Clone)]
 pub struct Transcript {
     pub text: String,
     pub request_seconds: f64,
     pub inference_seconds: Option<f64>,
 }
+#[derive(Clone)]
+pub struct Dictation {
+    pub original: String,
+    pub text: String,
+    pub mode: String,
+    pub warning: Option<String>,
+    pub request_seconds: f64,
+    pub inference_seconds: Option<f64>,
+    pub processing_seconds: f64,
+    pub preview_only: bool,
+}
+pub fn process_transcript(
+    config: &Config,
+    transcript: Transcript,
+    preview_only: bool,
+    cancelled: impl Fn() -> bool,
+) -> Result<Dictation> {
+    // Reserve before process_with checks the caller's generation. Whichever side
+    // of Stop this runs on, either that check or the model ticket rejects old work.
+    let editor = editor()?;
+    let ticket = editor.ticket();
+    process_with(config, transcript, preview_only, cancelled, |text, mode| {
+        editor.process_with_ticket(ticket, text, mode)
+    })
+}
+fn process_with(
+    config: &Config,
+    transcript: Transcript,
+    preview_only: bool,
+    cancelled: impl Fn() -> bool,
+    process: impl FnOnce(&str, &str) -> Result<String>,
+) -> Result<Dictation> {
+    if cancelled() {
+        bail!("已取消处理");
+    }
+    let mut result = Dictation {
+        original: transcript.text.clone(),
+        text: transcript.text,
+        mode: config.output_mode.clone(),
+        warning: None,
+        request_seconds: transcript.request_seconds,
+        inference_seconds: transcript.inference_seconds,
+        processing_seconds: 0.,
+        preview_only,
+    };
+    if config.output_mode == "raw" || result.original.trim().is_empty() {
+        return Ok(result);
+    }
+    let started = Instant::now();
+    let processed = process(&result.original, &config.output_mode).and_then(|text| {
+        if text.trim().is_empty() {
+            bail!("整理结果为空");
+        }
+        Ok(text.trim().to_owned())
+    });
+    if cancelled() {
+        bail!("已取消处理");
+    }
+    result.processing_seconds = started.elapsed().as_secs_f64();
+    match processed {
+        Ok(text) => result.text = text,
+        Err(error) => {
+            result.warning = Some(format!(
+                "{}：{error}",
+                if config.output_mode == "notes" {
+                    "笔记整理未完成，本次使用原始转写"
+                } else {
+                    "整理未完成，本次使用原始转写"
+                }
+            ))
+        }
+    }
+    crate::diagnostics::record(
+        "text_processed",
+        serde_json::json!({
+            "mode":result.mode, "asr_mode":config.asr_mode,
+            "seconds":result.processing_seconds, "fallback":result.warning.is_some(),
+        }),
+    );
+    Ok(result)
+}
+pub fn prepare_text_task() -> Result<impl FnOnce() -> Result<String> + Send + 'static> {
+    let editor = editor()?.clone();
+    let ticket = editor.ticket();
+    Ok(move || editor.prepare_with_ticket(ticket, true))
+}
+pub struct TextStatus {
+    pub installed: bool,
+    pub ready: bool,
+    pub message: String,
+}
+pub fn text_status(_config: &Config) -> Result<TextStatus> {
+    let status = editor()?.health();
+    let message = match status.state {
+        "downloading" => "正在下载整理模型，完成后可以离线使用",
+        "loading" => "正在加载整理模型，完成后继续处理",
+        "processing" => "正在整理完整正文",
+        _ if status.ready => "Agentic 已就绪；空闲 60 秒释放内存，下次整理自动加载",
+        _ if status.installed => "模型已安装，当前未占用模型内存；下次整理自动加载，也可提前预加载",
+        _ => "尚未下载整理模型；准备一次后即可离线使用",
+    };
+    Ok(TextStatus {
+        installed: status.installed,
+        ready: status.ready,
+        message: message.into(),
+    })
+}
 pub fn transcribe_recording(
-    client: &Client,
     config: &Config,
     samples: &[f32],
     rate: u32,
     cancelled: impl Fn() -> bool,
     mut progress: impl FnMut(usize, usize),
 ) -> Result<Transcript> {
+    if rate == 0 {
+        bail!("录音采样率无效");
+    }
     let ranges = recognition_ranges(samples, rate);
     let mut result = Transcript {
         text: String::new(),
         request_seconds: 0.,
-        inference_seconds: Some(0.),
+        inference_seconds: None,
     };
     for (index, range) in ranges.iter().enumerate() {
         if cancelled() {
             bail!("已取消识别");
         }
         progress(index + 1, ranges.len());
-        let encoding = Instant::now();
-        let wav = crate::audio::encode_wav(&samples[range.clone()], rate)?;
-        crate::diagnostics::record(
-            "asr_chunk_encoded",
-            serde_json::json!({"index":index+1,
-            "total":ranges.len(),"audio_seconds":range.len() as f64 / rate as f64,
-            "encode_ms":encoding.elapsed().as_millis()}),
-        );
-        let part = transcribe_timed(client, config, wav)?;
+        let started = Instant::now();
+        let part = crate::runtime::transcribe(config, &samples[range.clone()], rate)?;
+        if cancelled() {
+            bail!("已取消识别");
+        }
         if result
             .text
             .ends_with(|c: char| c.is_ascii_alphanumeric() || c.is_ascii_punctuation())
-            && part.text.starts_with(|c: char| c.is_ascii_alphanumeric())
+            && part.starts_with(|c: char| c.is_ascii_alphanumeric())
         {
             result.text.push(' ');
         }
-        result.text.push_str(&part.text);
-        result.request_seconds += part.request_seconds;
-        result.inference_seconds = result
-            .inference_seconds
-            .zip(part.inference_seconds)
-            .map(|(a, b)| a + b);
+        result.text.push_str(&part);
+        let seconds = started.elapsed().as_secs_f64();
+        result.request_seconds += seconds;
+        crate::diagnostics::record(
+            "asr_response",
+            serde_json::json!({
+                "asr_mode":config.asr_mode, "term_count":config.terms.len(),
+                "seconds":seconds, "index":index+1, "total":ranges.len(),
+                "audio_seconds":range.len() as f64/rate as f64, "runtime":"native",
+            }),
+        );
     }
     Ok(result)
 }
-
+pub fn decode_wav(bytes: &[u8]) -> Result<(Vec<f32>, u32)> {
+    let mut reader = hound::WavReader::new(Cursor::new(bytes)).context("无法读取 WAV 录音")?;
+    let spec = reader.spec();
+    if spec.channels == 0 || spec.sample_rate == 0 {
+        bail!("WAV 格式无效");
+    }
+    let samples = match spec.sample_format {
+        hound::SampleFormat::Float => reader
+            .samples::<f32>()
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+        hound::SampleFormat::Int => {
+            let scale = 2_f32.powi(spec.bits_per_sample as i32 - 1);
+            reader
+                .samples::<i32>()
+                .map(|s| s.map(|s| s as f32 / scale))
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        }
+    };
+    let mono = samples
+        .chunks_exact(spec.channels as usize)
+        .map(|frame| frame.iter().sum::<f32>() / spec.channels as f32)
+        .collect();
+    Ok((mono, spec.sample_rate))
+}
+pub fn transcribe_timed(config: &Config, wav: Vec<u8>) -> Result<Transcript> {
+    let (samples, rate) = decode_wav(&wav)?;
+    transcribe_recording(config, &samples, rate, || false, |_, _| {})
+}
 fn recognition_ranges(samples: &[f32], rate: u32) -> Vec<std::ops::Range<usize>> {
-    // Backend requests are bounded, but nothing is recognized or submitted before
-    // manual stop. Prefer a quiet 100 ms boundary near each 25 second limit.
+    // Manual stop owns submission. Split only after it, with lossless boundaries.
     let rate = rate.max(1) as usize;
     let mut start = 0;
     let mut result = Vec::new();
@@ -144,216 +239,115 @@ fn recognition_ranges(samples: &[f32], rate: u32) -> Vec<std::ops::Range<usize>>
     }
     result
 }
-
 #[cfg(test)]
-mod recording_tests {
+mod tests {
     use super::*;
+    use std::cell::Cell;
+    fn transcript() -> Transcript {
+        Transcript {
+            text: "嗯，把 AGV 的 blueprint 导入 UE，不要修改 shader。".into(),
+            request_seconds: 0.5,
+            inference_seconds: Some(0.3),
+        }
+    }
+    #[test]
+    fn raw_bypasses_editor() {
+        let r = process_with(
+            &Config::default(),
+            transcript(),
+            false,
+            || false,
+            |_, _| panic!("raw must not load editor"),
+        )
+        .unwrap();
+        assert_eq!(r.text, r.original);
+        assert_eq!(r.request_seconds, 0.5);
+        assert_eq!(r.processing_seconds, 0.);
+    }
+    #[test]
+    fn only_explicit_retry_skips_delivery_and_original_is_retained() {
+        for mode in ["clean", "notes"] {
+            for retry in [false, true] {
+                let config = Config {
+                    output_mode: mode.into(),
+                    ..Config::default()
+                };
+                let r = process_with(
+                    &config,
+                    transcript(),
+                    retry,
+                    || false,
+                    |text, m| {
+                        assert_eq!(text, transcript().text);
+                        assert_eq!(m, mode);
+                        Ok("整理正文".into())
+                    },
+                )
+                .unwrap();
+                assert_eq!(r.original, transcript().text);
+                assert_eq!(r.text, "整理正文");
+                assert_eq!(r.preview_only, retry);
+            }
+        }
+    }
+    #[test]
+    fn failure_or_empty_output_keeps_complete_original() {
+        let config = Config {
+            output_mode: "notes".into(),
+            ..Config::default()
+        };
+        for fail in [false, true] {
+            let r = process_with(
+                &config,
+                transcript(),
+                false,
+                || false,
+                |_, _| {
+                    if fail {
+                        bail!("model unavailable");
+                    }
+                    Ok(" ".into())
+                },
+            )
+            .unwrap();
+            assert_eq!(r.text, transcript().text);
+            assert!(r.warning.is_some());
+        }
+    }
+    #[test]
+    fn cancellation_discards_both_output_and_fallback() {
+        let config = Config {
+            output_mode: "notes".into(),
+            ..Config::default()
+        };
+        for fail in [false, true] {
+            let cancelled = Cell::new(false);
+            let r = process_with(
+                &config,
+                transcript(),
+                false,
+                || cancelled.get(),
+                |_, _| {
+                    cancelled.set(true);
+                    if fail {
+                        bail!("stopped");
+                    }
+                    Ok("正文".into())
+                },
+            );
+            assert!(r.is_err());
+        }
+    }
     #[test]
     fn long_audio_ranges_are_bounded_lossless_and_prefer_pauses() {
         let mut samples = vec![0.2; 16000 * 63];
         samples[16000 * 23..16000 * 24].fill(0.);
-        let ranges = recognition_ranges(&samples, 16000);
-        assert!(ranges.len() >= 3);
-        assert!((16000 * 23..16000 * 24).contains(&ranges[0].end));
-        assert!(
-            ranges
-                .iter()
-                .all(|r| !r.is_empty() && r.len() <= 16000 * 25)
-        );
-        assert_eq!(ranges[0].start, 0);
-        assert_eq!(ranges.last().unwrap().end, samples.len());
-        assert!(ranges.windows(2).all(|r| r[0].end == r[1].start));
-    }
-}
-pub fn transcribe_timed(client: &Client, config: &Config, wav: Vec<u8>) -> Result<Transcript> {
-    let started = Instant::now();
-    let form = multipart::Form::new()
-        .part(
-            "file",
-            multipart::Part::bytes(wav)
-                .file_name("recording.wav")
-                .mime_str("audio/wav")?,
-        )
-        .text("language", "auto");
-    let response = client
-        .post(format!("{}/v1/audio/transcriptions", config.asr_url))
-        .multipart(form)
-        .send()?;
-    if !response.status().is_success() {
-        crate::diagnostics::record(
-            "asr_http_error",
-            serde_json::json!({"status":response.status().as_u16(),"http_seconds":started.elapsed().as_secs_f64()}),
-        );
-        bail!("识别服务返回 {}", response.status());
-    }
-    let value: serde_json::Value = response.json()?;
-    crate::diagnostics::record(
-        "asr_response",
-        serde_json::json!({"http_seconds":started.elapsed().as_secs_f64(),"server_seconds":value["inference_seconds"],"audio_seconds":value["duration"]}),
-    );
-    Ok(Transcript {
-        text: value["text"].as_str().unwrap_or_default().to_owned(),
-        request_seconds: started.elapsed().as_secs_f64(),
-        inference_seconds: value["inference_seconds"].as_f64(),
-    })
-}
-pub fn speak(
-    config: Config,
-    text: String,
-    id: u64,
-    generation: Arc<AtomicU64>,
-    mut update: impl FnMut(&str),
-) -> Result<()> {
-    if text.chars().count() > 20000 {
-        bail!("朗读文本超过 20000 字，请缩小选区；文本没有被截断朗读");
-    }
-    let parts: Vec<_> = crate::text::segments(&text)
-        .into_iter()
-        .filter(|part| !part.trim().is_empty())
-        .collect();
-    let client = client()?;
-    let (_stream, handle) = rodio::OutputStream::try_default()?;
-    let sink = rodio::Sink::try_new(&handle)?;
-    queue_speech(&parts, &sink, id, generation, &mut update, |sentence| {
-        for attempt in 0..4 {
-            let response = client.post(format!("{}/v1/audio/speech", config.tts_url))
-                .json(&serde_json::json!({"input":sentence,"voice":config.voice,"speed":config.speed}))
-                .send().context("朗读合成失败")?;
-            if response.status() == 429 && attempt < 3 {
-                thread::sleep(Duration::from_millis(700));
-                continue;
-            }
-            if !response.status().is_success() {
-                bail!("朗读服务返回 {}", response.status());
-            }
-            return Ok(response.bytes()?.to_vec());
-        }
-        bail!("朗读服务忙碌")
-    })
-}
-
-fn queue_speech(
-    parts: &[String],
-    sink: &rodio::Sink,
-    id: u64,
-    generation: Arc<AtomicU64>,
-    mut update: impl FnMut(&str),
-    mut synthesize: impl FnMut(&str) -> Result<Vec<u8>>,
-) -> Result<()> {
-    use rodio::Source;
-    update("正在准备朗读…");
-    for part in parts {
-        // Keep at most the current audio plus one successor. Synthesize the
-        // successor while rodio plays the current source on its audio thread.
-        while sink.len() >= 2 {
-            if generation.load(Ordering::SeqCst) != id {
-                sink.stop();
-                return Ok(());
-            }
-            thread::sleep(Duration::from_millis(25));
-        }
-        if generation.load(Ordering::SeqCst) != id {
-            sink.stop();
-            return Ok(());
-        }
-        let audio = synthesize(part)?;
-        if generation.load(Ordering::SeqCst) != id {
-            sink.stop();
-            return Ok(());
-        }
-        let cancellation = generation.clone();
-        // Cancellation must also stop playback while this worker is blocked on
-        // the next HTTP request. The audio thread checks it independently.
-        let source = rodio::Decoder::new(Cursor::new(audio))?
-            .stoppable()
-            .periodic_access(Duration::from_millis(20), move |source| {
-                if cancellation.load(Ordering::SeqCst) != id {
-                    source.stop();
-                }
-            });
-        sink.append(source);
-        update("正在朗读 · 再按停止");
-    }
-    while !sink.empty() {
-        if generation.load(Ordering::SeqCst) != id {
-            sink.stop();
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod playback_tests {
-    use super::*;
-    #[test]
-    fn cancellation_stops_audio_during_the_next_synthesis() {
-        let (sink, mut output) = rodio::Sink::new_idle();
-        let generation = Arc::new(AtomicU64::new(1));
-        let cancel = generation.clone();
-        let mut calls = 0;
-        queue_speech(
-            &["第一句".into(), "第二句".into()],
-            &sink,
-            1,
-            generation,
-            |_| {},
-            |_| {
-                calls += 1;
-                if calls == 2 {
-                    cancel.store(2, Ordering::SeqCst);
-                    // Emulate the audio thread while synthesis has not returned.
-                    for _ in 0..100000 {
-                        output.next();
-                        if sink.empty() {
-                            break;
-                        }
-                    }
-                    assert!(sink.empty(), "Cancellation waited for synthesis to finish");
-                }
-                crate::audio::encode_wav(&vec![0.1; 16000 * 10], 16000)
-            },
-        )
-        .unwrap();
-        assert_eq!(calls, 2);
-    }
-    #[test]
-    fn prefetches_while_audio_is_queued_and_bounds_the_queue() {
-        // Idle sink has no device: no sound is played. It stays full until cancelled.
-        let (sink, _output) = rodio::Sink::new_idle();
-        let generation = Arc::new(AtomicU64::new(1));
-        let calls = std::cell::Cell::new(0);
-        let parts = vec!["测试".to_owned(); 20];
-        let cancel = generation.clone();
-        let mut cancel_thread = None;
-        queue_speech(
-            &parts,
-            &sink,
-            1,
-            generation,
-            |_| {},
-            |_| {
-                let n = calls.get() + 1;
-                calls.set(n);
-                if n == 2 {
-                    assert_eq!(
-                        sink.len(),
-                        1,
-                        "Next synthesis must start before playback finishes"
-                    );
-                    let cancel = cancel.clone();
-                    cancel_thread = Some(thread::spawn(move || {
-                        thread::sleep(Duration::from_millis(80));
-                        cancel.store(2, Ordering::SeqCst);
-                    }));
-                }
-                assert!(n <= 2, "A full queue must not fetch a third chunk");
-                crate::audio::encode_wav(&vec![0.1; 16000], 16000)
-            },
-        )
-        .unwrap();
-        cancel_thread.unwrap().join().unwrap();
-        assert_eq!(calls.get(), 2);
+        let r = recognition_ranges(&samples, 16000);
+        assert!(r.len() >= 3);
+        assert!((16000 * 23..16000 * 24).contains(&r[0].end));
+        assert!(r.iter().all(|r| !r.is_empty() && r.len() <= 16000 * 25));
+        assert_eq!(r[0].start, 0);
+        assert_eq!(r.last().unwrap().end, samples.len());
+        assert!(r.windows(2).all(|r| r[0].end == r[1].start));
     }
 }

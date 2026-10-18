@@ -1,113 +1,97 @@
 # Windows 安装指南
 
-默认下载 GitHub Release 中已编译的 Slint 悬浮窗和 llama.cpp 官方程序。用户无需编译，不需要 Rust、Visual Studio、CUDA Toolkit 或 WSL。
+v0.4.0 的录音、Silero VAD、SenseVoice 识别、Qwen ASR 和 Agentic 整理均通过 Rust 与原生运行库完成。安装和运行不使用 Python、uv、pip、PyTorch 或 `.venv`。
 
-## 1. 自行准备前置环境
+**默认安装 [v0.4.0 预编译 Release](https://github.com/wht-github/LocalVoice/releases/tag/v0.4.0)，无需 Rust 或 C++ 开发环境。** 只有显式传入 `-LocalBuild` 时才构建源码。
 
-- Windows x64、Git、PowerShell 7，以及可用的 `curl.exe`。
-- 自行安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 和 Python 3.12。已经有 Python 3.13 的用户也可以自行创建 `.venv`，见下一节。
-- 使用 Qwen 时需要支持当前 CUDA 13.3 官方包的 NVIDIA 显卡与驱动；没有合适显卡可只安装 SenseVoice CPU。
-- 完整安装建议预留 15 GB 磁盘空间，包含模型、Python 依赖和下载缓存。两个 Qwen 模型及其音频编码器合计约 4 GB。
+## 1. 前置环境
 
-在 PowerShell 7 中确认：
+- Windows x64、Git、PowerShell 7，系统自带的 `curl.exe` 与 `tar.exe`。
+- 仅源码构建需要 Rust MSVC 工具链与 Visual Studio C++ Build Tools。预编译包已包含 sherpa-onnx 与 ONNX Runtime DLL。
+- 使用 Qwen GPU 识别需要支持所固定 CUDA 13.3 运行库的 NVIDIA 驱动。只用 CPU 可选择下方的 `-CpuOnly`，无需 NVIDIA 显卡。
+- 需要时安装 [Microsoft VC++ x64 运行库](https://aka.ms/vc14/vc_redist.x64.exe)。无需 CUDA Toolkit、WSL 或 Python。
 
-```powershell
-git --version
-uv --version
-uv python install 3.12
-uv python find 3.12 --no-python-downloads
-```
-
-`uv python install` 是用户准备环境的步骤。项目安装脚本不会安装 uv、下载 Python 或修改全局 PATH；它只使用已有解释器。
-
-## 2. Clone 并安装
+## 2. 安装 v0.4.0
 
 ```powershell
-git clone https://github.com/wht-github/LocalVoice.git
+git clone --branch v0.4.0 https://github.com/wht-github/LocalVoice.git
 cd LocalVoice
 ./install.ps1
 ./desktop.ps1
 ```
 
-安装脚本依次完成：
+安装脚本按仓库版本下载客户端 ZIP 和 SHA256 校验文件，校验后安装到 `.runtime/desktop`，并准备 Silero VAD、SenseVoice INT8、llama.cpp、Qwen ASR 1.7B 与 0.6B 及其音频编码器。已有完整模型与已验证下载包会复用，不重复下载。Qwen 两套模型与编码器合计约 4 GB。
 
-1. 用已有 Python 3.12 创建项目 `.venv`，通过 uv 安装 CPU 版 PyTorch 和识别服务依赖。
-2. 根据 `desktop/Cargo.toml` 的版本下载配套 Slint Release，并校验 SHA256。
-3. 下载固定版本的 SenseVoiceSmall 模型到仓库缓存。
-4. 下载并校验官方 llama.cpp、CUDA DLL、Qwen ASR 1.7B Q8 和 0.6B Q8，以及各自的 BF16 音频编码器。
-
-如果希望使用已有 Python 3.13，请在执行 `install.ps1` 前运行：
-
-```powershell
-uv venv --python 3.13 --no-python-downloads .venv
-```
-
-无需激活 `.venv`。项目安装和启动均使用它的绝对路径，不会安装到当前终端激活的其他项目环境中。
-
-仅安装 CPU 模式：
+只用 CPU：
 
 ```powershell
 ./install.ps1 -CpuOnly
 ./desktop.ps1
 ```
 
-这种安装请在设置中保持 SenseVoice CPU；之后运行不带 `-CpuOnly` 的安装命令即可补齐两个 Qwen 模型。三种模式一次只加载一种。
+CPU 安装包含 VAD、SenseVoice INT8 与独立的 llama.cpp CPU 包，跳过 Qwen 下载。CPU 包保存在 `.runtime/llama-cpu`，不覆盖已安装的 CUDA 包；Agentic 整理会优先使用它。
 
-若 PowerShell 阻止脚本运行，可仅对本次进程放行：
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File ./install.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File ./desktop.ps1
-```
-
-## 3. 首次使用
-
-新配置默认使用 SenseVoice CPU，朗读关闭。启动后单击悬浮球展开操作面板，等待显示识别已就绪；在设置中选择需要的模型并保存。Qwen 模式会停止旧服务后加载 GPU 模型。拖动悬浮球可调整位置，托盘左键可找回入口。
-
-按 **Ctrl+Alt+Space** 开始说话，再次按下结束，识别结果输入当前目标窗口。也可以在设置中开启连续听写。窗口收起后仍在托盘运行；从托盘退出会停止它启动的识别进程。
-
-## 4. 本地文件布局
-
-| 路径（相对 clone 根目录） | 内容 |
-| --- | --- |
-| `.venv/` | 项目 Python 环境，使用用户已有 uv Python |
-| `.runtime/desktop/` | 下载的 Slint EXE、构建信息、第三方许可 |
-| `.runtime/llama/` | 官方 llama.cpp 程序与 CUDA DLL |
-| `.runtime/models/` | 两套 Qwen GGUF 权重 |
-| `.runtime/cache/` | SenseVoice、uv 包、音频处理缓存 |
-| `.runtime/downloads/` | 原始 ZIP 与校验文件 |
-| `.runtime/settings.json` | 模型、麦克风、快捷键等设置 |
-| `.runtime/native-asr.log` | 识别服务日志 |
-| `.runtime/timings.jsonl` | 有大小上限的耗时记录，不含转写正文 |
-
-项目安装内容保留在 clone 目录中。uv 和基础 Python 由用户管理，项目 `.venv` 仍依赖该基础 Python；不要删除基础解释器。移动整个仓库后，应重建 `.venv`，其他模型与设置可以保留。不要单独把 EXE 移出仓库，程序通过 EXE 的位置寻找服务脚本和环境。
-
-## 5. 更新与排查
-
-先从托盘退出，再更新：
+已经有 Qwen 和 Agentic 的用户，在原仓库目录中升级；先从托盘退出旧客户端：
 
 ```powershell
-git pull --ff-only
+git fetch --tags
+git switch --detach v0.4.0
 ./install.ps1
 ./desktop.ps1
 ```
 
-使用过 `-CpuOnly` 且仍只需要 CPU 的用户，更新时继续加该参数。已存在的模型会校验并复用，设置不会被覆盖。只需重新安装客户端时可执行 `./scripts/setup-desktop.ps1`。
+已有 Qwen、Agentic 权重和 `.runtime/settings.json` 会保留，旧模型与研究文件不会被删除。只用 CPU 的用户继续传 `-CpuOnly`，并在设置中选择 SenseVoice CPU；安装不会改写已保存的模型选择。旧版 SenseVoice 的 Python 权重不能替代本版原生 INT8 权重，因此首次升级需要补充原生 SenseVoice 和 Silero 文件。
 
-- 缺少 uv 或 Python：完成第一节前置步骤后重试。安装脚本不会替你下载解释器。
-- Python 包下载慢：运行 `./install.ps1 -PyIndex https://pypi.tuna.tsinghua.edu.cn/simple`；CPU PyTorch 仍来自官方 wheel 源。
-- 模型连接失败：可先设置 `$env:HF_ENDPOINT = 'https://huggingface.co'` 或可用的 Hugging Face 镜像地址，再执行安装。SenseVoice 默认使用 `https://hf-mirror.com`，Qwen 默认使用官方站点；该变量对两者都生效。
-- Release 下载失败：检查 [项目 Releases](https://github.com/wht-github/LocalVoice/releases) 与网络。每个源码版本固定配套客户端版本，不从源码自动编译。
-- 提示缺少 VC++ DLL：安装 [Microsoft VC++ x64 运行库](https://aka.ms/vc14/vc_redist.x64.exe)，无需安装 Visual Studio。
-- GPU 加载失败：查看 `.runtime/native-asr.log`，执行 `.runtime/llama/llama-server.exe --list-devices`；检查 NVIDIA 驱动或先使用 SenseVoice CPU。
-- 端口 8001 被占用：从启动旧服务的程序停止它，避免同时运行多个 clone 的客户端。
-
-部署验收（先退出日常客户端）：
+需要从源码构建时，在项目根目录执行：
 
 ```powershell
-./.runtime/desktop/local-voice-desktop.exe --asr-models-check tests/fixtures/ascend-01219.wav outputs/asr-models-check.json
+./install.ps1 -LocalBuild
+./desktop.ps1 -LocalBuild
 ```
 
-此检查需要完整安装，会切换 CPU → 0.6B → 1.7B → CPU 并转写两秒公开真人录音，不采集麦克风、不输入文字。它验证部署链路，不代表准确率评测。
+也可组合 `-LocalBuild -CpuOnly`。构建时 Cargo 会下载固定版本的原生运行库，并将 DLL 放到 EXE 同目录；首次构建需要联网和额外的构建缓存空间。
 
-朗读是独立的可选 WSL MeloTTS 功能，本安装流程不安装，默认关闭。需要时参阅 [朗读部署记录](docs/melo-and-service-control.md)。开发者修改客户端源码的构建方式见 [desktop/README.md](desktop/README.md)，普通安装无需此步骤。
+运行中的客户端必须先从托盘退出；安装脚本会在更新前检查本项目的下载版与本地构建版，检测到仍在运行便停止安装。`desktop.ps1 -LocalBuild` 启动 `desktop/target/release` 中的构建版；不带参数启动 `.runtime/desktop` 中的 Release。`install.ps1 -Prebuilt` 保留为默认安装方式的兼容写法，不能与 `-LocalBuild` 同时使用。
+
+## 3. 首次使用
+
+启动后可在设置中选择 SenseVoice CPU、Qwen ASR 0.6B 或 1.7B。三者一次只加载一种。单击悬浮球展开操作面板，按 **Ctrl+Alt+Space** 开始说话，再次按下结束；也可点击面板上的开始、结束按钮。
+
+Silero VAD 只判断音频是否有人声，用来减少纯噪声触发并保留轻声；约 629 KiB 的模型使用 CPU。日常输入和笔记仍由你手动结束，内部停顿不会提交。可选连续听写仅用于原样转写，停顿后提交分段结果。
+
+日常输入和笔记都会在手动结束后识别、整理完整正文，再自动输入结束时的目标。等待期间目标变更时保留文字供复制。笔记对照窗口默认关闭，可在设置中打开；最近原文与正文仍可从面板手动查看。
+
+Agentic 整理模型不随 `install.ps1` 下载。在设置中点击“准备整理模型”，额外下载约 688 MB 的 AgenticASR-Refiner Q4_K_M，固定版本并校验 SHA256。已有权重复用，CPU 4 线程、4096 上下文、0 GPU 层；按需加载，空闲 60 秒释放。整理失败或超过完整输出预算时保留全部原文。无需手动维护术语表即可使用。
+
+## 4. 文件布局
+
+| 路径 | 内容 |
+| --- | --- |
+| `desktop/target/release/` | 本地构建的 EXE、sherpa 与 ONNX Runtime DLL |
+| `.runtime/desktop/` | 下载的预编译 Release 与第三方许可 |
+| `.runtime/llama/` | CUDA 版 llama.cpp 与 DLL，供 Qwen 使用 |
+| `.runtime/llama-cpu/` | 可选 CPU 版 llama.cpp，供 Agentic 使用 |
+| `.runtime/models/silero-vad/` | 轻量人声检测模型 |
+| `.runtime/models/sensevoice-int8/` | 原生 SenseVoice INT8 与词元表 |
+| `.runtime/models/` | Qwen 与 Agentic GGUF 权重 |
+| `.runtime/downloads/` | 已下载的原始安装包 |
+| `.runtime/settings.json` | 麦克风、输出模式、快捷键等设置 |
+| `.runtime/native-asr.log`、`.runtime/native-text.log` | 原生模型进程日志 |
+| `.runtime/timings.jsonl` | 有大小上限的耗时记录，不含转写正文 |
+
+保留 EXE 与同目录 DLL，并保留整个仓库布局。程序按 EXE 位置寻找资源，不依赖当前终端目录。旧 `.venv`、Python 服务和研究脚本不再属于应用运行链路；无需卸载系统 Python，也不自动删除历史实验文件。
+
+## 5. 更新与排查
+
+退出托盘客户端后，切换到目标版本的 Git 标签并重新运行 `install.ps1`，然后使用 `desktop.ps1`。本地源码构建才在安装和启动时都加 `-LocalBuild`；仅 CPU 安装继续传 `-CpuOnly`。模型和保存的设置会保留。
+
+- 缺少 `cargo` 或 C++ 链接器：不带 `-LocalBuild` 安装预编译版，或安装源码构建工具；不需要补 Python。
+- 缺少 `sherpa-onnx-c-api.dll`、`onnxruntime.dll`：保留 EXE 同目录全部 DLL；重新构建或重新安装完整原生 Release，不单独复制 EXE。
+- VAD / SenseVoice 资源缺失：运行 `./scripts/setup-speech.ps1`。仅补 VAD 可加 `-VadOnly`。
+- Qwen 模型缺失：运行 `./scripts/download-qwen-gguf.ps1 -Size 1.7B` 或 `-Size 0.6B`。
+- Agentic 缺少 llama.cpp：CPU 机器运行 `./scripts/setup-llama.ps1 -CpuOnly`；使用 Qwen 的机器运行不带参数的版本。
+- Hugging Face 连接失败：可设置 `$env:HF_ENDPOINT` 为可访问的镜像，再下载 Qwen 或准备 Agentic。VAD 与 SenseVoice 安装包来自 sherpa-onnx 官方 GitHub Release。
+- GPU 加载失败：查看原生日志，运行 `.runtime/llama/llama-server.exe --list-devices` 检查驱动；也可切换 SenseVoice CPU。
+- 新旧版本混淆：先退出旧客户端，按上面的升级流程安装 v0.4.0，再运行 `./desktop.ps1`。使用本地构建时才加 `-LocalBuild`；旧 v0.3.0 预编译包不包含本轮原生改造。
+
+开发验证与窗口诊断见 [desktop/README.md](desktop/README.md)。维护者提交源码后用 `./scripts/package-desktop.ps1` 打包，产物包含 EXE、全部原生 DLL、构建信息、第三方许可和 SHA256 校验文件，整个过程不需要 Python。

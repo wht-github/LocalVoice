@@ -1,24 +1,21 @@
-//! Host-side control: native Windows ASR child process plus the optional WSL TTS unit.
-//! No management HTTP server. The dictation path never touches WSL.
-use crate::config::Config;
+//! Own the selected native ASR model. Python and public service ports are unused.
+use crate::{config::Config, llama::Server, sensevoice::Recognizer};
 use anyhow::{Context, Result, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde_json::{Value, json};
 use std::{
-    fs::OpenOptions,
-    os::windows::process::CommandExt,
-    process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub enum Operation {
     Start(Config),
     Stop,
-    Tts(Config),
 }
 pub struct Manager {
     sender: mpsc::Sender<(u64, Operation)>,
@@ -31,12 +28,22 @@ impl Manager {
         let current = revision.clone();
         thread::spawn(move || {
             while let Ok((id, operation)) = receiver.recv() {
-                notify(true, "正在调整语音服务…".into());
-                let result = apply(operation, || current.load(Ordering::SeqCst) != id);
+                if current.load(Ordering::SeqCst) != id {
+                    continue;
+                }
+                notify(true, "正在调整识别模型…".into());
+                let result = match operation {
+                    // Stop is performed when it is sent, before a later Start can
+                    // supersede its notification or start another model.
+                    Operation::Stop => Ok("识别与整理模型已停止".into()),
+                    Operation::Start(config) => apply(Operation::Start(config), || {
+                        current.load(Ordering::SeqCst) != id
+                    }),
+                };
                 if current.load(Ordering::SeqCst) == id {
                     notify(
                         false,
-                        result.unwrap_or_else(|e| format!("服务操作失败：{e:#}；可重试启动")),
+                        result.unwrap_or_else(|e| format!("模型操作失败：{e:#}；可重试启动")),
                     );
                 }
             }
@@ -45,299 +52,347 @@ impl Manager {
     }
     pub fn send(&self, operation: Operation) {
         let id = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
+        if matches!(operation, Operation::Stop) {
+            native_stop();
+        }
         let _ = self.sender.send((id, operation));
     }
 }
 
-// ---- native Windows ASR child process ----
+enum Model {
+    Qwen(Server),
+    SenseVoice(Recognizer),
+}
+impl Model {
+    fn ready(&self) -> bool {
+        match self {
+            Self::Qwen(server) => server.ready(),
+            Self::SenseVoice(_) => true,
+        }
+    }
+    fn close(&self) {
+        if let Self::Qwen(server) = self {
+            if let Err(error) = server.close() {
+                eprintln!("{error:#}");
+            }
+        }
+    }
+}
 
-struct NativeAsr {
-    child: Option<Child>,
+#[derive(Default)]
+struct State {
     mode: String,
+    model: Option<Arc<Model>>,
 }
-static NATIVE: OnceLock<Mutex<NativeAsr>> = OnceLock::new();
+static NATIVE: OnceLock<Mutex<State>> = OnceLock::new();
+static START_LOCK: Mutex<()> = Mutex::new(());
+static REVISION: AtomicU64 = AtomicU64::new(0);
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
-// Whether this process has started the WSL TTS unit, so Stop avoids booting a
-// dormant distro just to run `systemctl stop`.
-static TTS_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-fn native_health(config: &Config) -> Option<serde_json::Value> {
-    let client = reqwest::blocking::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .ok()?;
-    client
-        .get(format!("{}/health", config.asr_url.trim_end_matches('/')))
-        .send()
-        .ok()?
-        .json::<serde_json::Value>()
-        .ok()
+fn state() -> &'static Mutex<State> {
+    NATIVE.get_or_init(|| Mutex::new(State::default()))
 }
-fn stop_native_child(child: &mut Child) -> Result<()> {
-    if child.try_wait()?.is_none() {
-        // Windows venv python.exe can be a launcher with a second Python child.
-        // Terminating only the launcher leaves the model holding the port/GPU.
-        let result = Command::new("taskkill.exe")
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .creation_flags(0x08000000)
-            .output()
-            .context("无法停止识别进程树")?;
-        if !result.status.success() && child.try_wait()?.is_none() {
+
+fn native_start(config: &Config, cancelled: impl Fn() -> bool) -> Result<()> {
+    // Start operations are serialized; stop never waits for model loading.
+    let _starting = START_LOCK.lock().unwrap();
+    if SHUTTING_DOWN.load(Ordering::SeqCst) || cancelled() {
+        bail!("模型加载已取消");
+    }
+    let (previous, revision) = {
+        let mut state = state().lock().unwrap();
+        if state.mode == config.asr_mode && state.model.as_ref().is_some_and(|m| m.ready()) {
+            return Ok(());
+        }
+        let revision = REVISION.fetch_add(1, Ordering::SeqCst) + 1;
+        state.mode = config.asr_mode.clone();
+        (state.model.take(), revision)
+    };
+    if let Some(previous) = previous {
+        previous.close();
+    }
+    let cancelled = || {
+        cancelled()
+            || SHUTTING_DOWN.load(Ordering::SeqCst)
+            || REVISION.load(Ordering::SeqCst) != revision
+    };
+    let model = match config.asr_mode.as_str() {
+        "sensevoice-cpu" => Model::SenseVoice(Recognizer::load()?),
+        "qwen-llama-0.6b" | "qwen-llama-1.7b" => Model::Qwen(Server::start(
+            &qwen_arguments(&config.asr_mode)?,
+            "asr",
+            Duration::from_secs(180),
+            &cancelled,
+        )?),
+        _ => bail!("识别模式无效"),
+    };
+    let mut state = state().lock().unwrap();
+    if cancelled() {
+        bail!("模型加载已取消");
+    }
+    state.model = Some(Arc::new(model));
+    Ok(())
+}
+
+fn qwen_arguments(mode: &str) -> Result<Vec<String>> {
+    let size = qwen_size(mode)?;
+    let directory = crate::paths::runtime()?.join(format!("models/Qwen3-ASR-{size}-GGUF"));
+    let decoder = directory.join(format!("Qwen3-ASR-{size}-Q8_0.gguf"));
+    let encoder = directory.join(format!("mmproj-Qwen3-ASR-{size}-bf16.gguf"));
+    for path in [&decoder, &encoder] {
+        if !path.is_file() {
             bail!(
-                "无法停止识别进程树：{}",
-                String::from_utf8_lossy(&result.stderr)
+                "缺少 {}；请运行 scripts/setup-llama.ps1 和 scripts/download-qwen-gguf.ps1 -Size {size}",
+                path.display()
             );
         }
     }
-    child.wait()?;
-    Ok(())
+    let mut args = vec![
+        "-m".into(),
+        decoder.to_string_lossy().into_owned(),
+        "--mmproj".into(),
+        encoder.to_string_lossy().into_owned(),
+    ];
+    args.extend(
+        [
+            "--device",
+            "CUDA0",
+            "-ngl",
+            "99",
+            "-c",
+            "2048",
+            "-b",
+            "256",
+            "-ub",
+            "256",
+            "-np",
+            "1",
+            "-t",
+            "4",
+            "-tb",
+            "4",
+            "-fa",
+            "on",
+            "-ctk",
+            "f16",
+            "-ctv",
+            "f16",
+            "--fit",
+            "off",
+            "--cache-ram",
+            "0",
+            "--no-cache-idle-slots",
+            "--no-context-shift",
+        ]
+        .map(str::to_owned),
+    );
+    Ok(args)
 }
-fn native_start(config: &Config) -> Result<()> {
-    let root = crate::paths::root()?;
-    let script = root.join("asr_server.py");
-    let python = root.join(".venv/Scripts/python.exe");
-    if !python.is_file() {
-        bail!(
-            "识别环境未安装（{}）；请运行对应的 setup 安装脚本",
-            python.display()
-        );
+
+fn qwen_size(mode: &str) -> Result<&'static str> {
+    match mode {
+        "qwen-llama-0.6b" => Ok("0.6B"),
+        "qwen-llama-1.7b" => Ok("1.7B"),
+        _ => bail!("识别模式无效"),
     }
-    let mut guard = NATIVE
-        .get_or_init(|| {
-            Mutex::new(NativeAsr {
-                child: None,
-                mode: String::new(),
-            })
-        })
-        .lock()
-        .unwrap();
+}
+
+fn selected(config: &Config) -> Result<Arc<Model>> {
     if SHUTTING_DOWN.load(Ordering::SeqCst) {
         bail!("应用正在退出");
     }
-    let same_mode = guard.mode == config.asr_mode;
-    if let Some(child) = guard.child.as_mut() {
-        if child.try_wait()?.is_none() {
-            if same_mode {
-                return Ok(());
-            }
-            stop_native_child(child).context("无法停止旧识别模型")?;
-        }
+    let state = state().lock().unwrap();
+    if state.mode != config.asr_mode {
+        bail!("所选识别模型尚未启动，请在设置中启动模型");
     }
-    guard.child = None;
-    // Another server may already own the port (e.g. WSL services from an old setup).
-    if let Some(health) = native_health(config) {
-        if health["ready"] == true {
-            if health["mode"] == config.asr_mode {
-                return Ok(());
-            }
-            bail!(
-                "识别端口被其他进程占用（{} 模式）；请先从启动它的程序停止服务",
-                health["mode"]
-            );
-        }
-    }
-    let log_dir = crate::paths::runtime()?;
-    let _ = std::fs::create_dir_all(&log_dir);
-    let open_log = || {
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_dir.join("native-asr.log"))
-            .map(Stdio::from)
-            .unwrap_or(Stdio::null())
-    };
-    let log_out = open_log();
-    let log_err = open_log();
-    let mut command = Command::new(&python);
-    command
-        .arg("-u")
-        .args(["-X", "utf8"])
-        .arg(&script)
-        .env("ASR_BACKEND", &config.asr_mode)
-        .env("ASR_THREADS", "4")
-        .env(
-            "HF_ENDPOINT",
-            std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://hf-mirror.com".into()),
-        )
-        .env("PYTHONUNBUFFERED", "1")
-        .current_dir(script.parent().unwrap_or(std::path::Path::new(".")))
-        .creation_flags(0x08000000)
-        .stdin(Stdio::null())
-        .stdout(log_out)
-        .stderr(log_err);
-    let child = command
-        .spawn()
-        .with_context(|| format!("无法启动原生识别进程（{}）", python.display()))?;
-    guard.child = Some(child);
-    guard.mode = config.asr_mode.clone();
-    Ok(())
+    state
+        .model
+        .as_ref()
+        .filter(|model| model.ready())
+        .cloned()
+        .context("识别模型尚未就绪，请在设置中启动模型")
 }
-pub fn native_stop() {
-    if let Some(lock) = NATIVE.get() {
-        if let Ok(mut guard) = lock.lock() {
-            if let Some(mut child) = guard.child.take() {
-                if let Err(error) = stop_native_child(&mut child) {
-                    eprintln!("{error:#}");
-                    guard.child = Some(child);
+
+pub fn ready(config: &Config) -> Result<()> {
+    selected(config).map(|_| ())
+}
+
+pub fn transcribe(config: &Config, samples: &[f32], rate: u32) -> Result<String> {
+    let revision = REVISION.load(Ordering::SeqCst);
+    let model = selected(config)?;
+    if samples.is_empty() || samples.iter().all(|&value| value == 0.) {
+        return Ok(String::new());
+    }
+    let samples = crate::vad::resample_mono(samples, rate, 16000)?;
+    let result = match model.as_ref() {
+        Model::SenseVoice(recognizer) => recognizer.transcribe(&samples),
+        Model::Qwen(server) => {
+            let context = config
+                .terms
+                .iter()
+                .map(|term| term.text.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            if !context.is_empty() {
+                let tokens = server.request(
+                    "/tokenize",
+                    &json!({"content": context}),
+                    Duration::from_secs(5),
+                )?;
+                if tokens["tokens"]
+                    .as_array()
+                    .context("模型未返回术语分词结果")?
+                    .len()
+                    > 512
+                {
+                    bail!("术语上下文超过 512 tokens；请减少本次术语");
                 }
             }
+            let wav = crate::audio::encode_wav(&samples, 16000)?;
+            let body = json!({
+                "messages": [
+                    {"role": "system", "content": context},
+                    {"role": "user", "content": [{"type": "input_audio", "input_audio": {
+                        "data": STANDARD.encode(wav), "format": "wav"
+                    }}]}
+                ],
+                "temperature": 0, "seed": 42, "max_tokens": 512,
+                "cache_prompt": false, "stream": false
+            });
+            parse_qwen_response(&server.request(
+                "/v1/chat/completions",
+                &body,
+                Duration::from_secs(90),
+            )?)
         }
+    }?;
+    if SHUTTING_DOWN.load(Ordering::SeqCst) || REVISION.load(Ordering::SeqCst) != revision {
+        bail!("识别已停止");
+    }
+    Ok(result)
+}
+
+fn parse_qwen_response(value: &Value) -> Result<String> {
+    let choice = &value["choices"][0];
+    if choice["finish_reason"] != "stop" {
+        bail!("识别未完整结束，请缩短录音后重试");
+    }
+    let raw = choice["message"]["content"]
+        .as_str()
+        .context("模型未返回识别正文")?;
+    let (_, text) = raw
+        .split_once("<asr_text>")
+        .context("Qwen 返回了无法解析的识别结果")?;
+    Ok(text.trim().to_owned())
+}
+
+pub fn native_stop() {
+    REVISION.fetch_add(1, Ordering::SeqCst);
+    crate::service::stop_text();
+    let model = state().lock().unwrap().model.take();
+    if let Some(model) = model {
+        model.close();
     }
 }
 
 pub fn shutdown() {
     SHUTTING_DOWN.store(true, Ordering::SeqCst);
+    crate::service::shutdown_text();
     native_stop();
 }
 
-// ---- optional WSL TTS ----
-
-fn wsl(user: &str) -> Command {
-    let mut command = Command::new("wsl.exe");
-    command
-        .args(["-d", "LocalVoice", "-u", user, "--cd", "/", "--"])
-        .creation_flags(0x08000000)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    command
-}
-fn unit(action: &str, units: &[&str]) -> Result<()> {
-    let mut child = wsl("root")
-        .arg("systemctl")
-        .arg(action)
-        .args(units)
-        .spawn()
-        .context("无法连接 LocalVoice WSL（朗读功能需要）；请确认专用 WSL 已安装")?;
-    let deadline = Instant::now() + Duration::from_secs(45);
-    loop {
-        if let Some(status) = child.try_wait()? {
-            if !status.success() {
-                bail!("LocalVoice 服务 {action} 失败，请查看 voice.ps1 logs");
-            }
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!("LocalVoice 服务操作超时");
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-}
-fn keep_alive() -> Result<()> {
-    let mut child = wsl("voice")
-        .args([
-            "flock",
-            "-n",
-            "/home/voice/.local/share/local-voice-app/keepalive.lock",
-            "sleep",
-            "infinity",
-        ])
-        .spawn()?;
-    // Reap duplicate flock attempts; the sole successful holder keeps this distro alive.
-    thread::spawn(move || {
-        let _ = child.wait();
-    });
-    Ok(())
-}
-fn tts_start() -> Result<()> {
-    keep_alive()?;
-    unit("start", &["local-voice-tts"])?;
-    TTS_ACTIVE.store(true, Ordering::SeqCst);
-    Ok(())
-}
-fn tts_stop() {
-    if TTS_ACTIVE.swap(false, Ordering::SeqCst) {
-        let _ = unit("stop", &["local-voice-tts"]);
-    }
-}
-
 pub fn managed(config: &Config) -> bool {
-    config.asr_url.trim_end_matches('/') == "http://127.0.0.1:8001"
-        && config.tts_url.trim_end_matches('/') == "http://127.0.0.1:8002"
+    crate::config::ASR_MODES
+        .iter()
+        .any(|(mode, _)| *mode == config.asr_mode)
 }
+
 pub fn apply(operation: Operation, cancelled: impl Fn() -> bool) -> Result<String> {
-    let (config, tts_only) = match operation {
+    let config = match operation {
         Operation::Stop => {
             native_stop();
-            tts_stop();
-            return Ok("识别、朗读均已停止，模型内存已释放".into());
+            return Ok("识别与整理模型已停止".into());
         }
-        Operation::Start(c) => (c, false),
-        Operation::Tts(c) => (c, true),
+        Operation::Start(config) => config,
     };
-    if !managed(&config) {
-        bail!("自定义地址请自行管理；一键启停仅支持默认本机地址");
-    }
-    if tts_only {
-        if config.tts_enabled {
-            tts_start()?;
-            return Ok("朗读已就绪；识别不受影响".into());
-        }
-        tts_stop();
-        return Ok("朗读已关闭，模型内存已释放；识别不受影响".into());
-    }
-    native_start(&config)?;
-    if config.tts_enabled {
-        tts_start()?;
-    } else {
-        tts_stop();
-    }
-    let client = reqwest::blocking::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(2))
-        .build()?;
-    let mut urls = vec![config.asr_url.trim_end_matches('/')];
-    if config.tts_enabled {
-        urls.push(config.tts_url.trim_end_matches('/'));
-    }
-    // The first native start downloads the SenseVoice model, which can take minutes.
-    let deadline = Instant::now() + Duration::from_secs(600);
-    loop {
-        if cancelled() {
-            return Ok("正在应用新的服务设置…".into());
-        }
-        if let Some(lock) = NATIVE.get() {
-            let mut guard = lock.lock().unwrap();
-            if let Some(child) = guard.child.as_mut() {
-                if let Some(status) = child.try_wait()? {
-                    bail!("识别进程启动失败（{status}）；请查看 .runtime/native-asr.log");
-                }
+    config.validate()?;
+    native_start(&config, &cancelled)?;
+    let name = crate::config::ASR_MODES
+        .iter()
+        .find(|(mode, _)| *mode == config.asr_mode)
+        .map(|(_, label)| *label)
+        .unwrap_or("未知模型");
+    Ok(format!("识别已就绪 · {name}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stop_invalidates_now_even_if_a_later_start_replaces_its_queued_notification() {
+        let (entered, wait_entered) = mpsc::channel();
+        let (release, wait_release) = mpsc::channel();
+        let (completed, wait_completed) = mpsc::channel();
+        let mut first = true;
+        let manager = Manager::new(move |busy, message| {
+            if busy && first {
+                first = false;
+                entered.send(()).unwrap();
+                let _ = wait_release.recv();
+            } else if !busy {
+                let _ = completed.send(message);
             }
-        }
-        let ready = urls.iter().all(|url| {
-            client
-                .get(format!("{url}/health"))
-                .send()
-                .and_then(|r| r.error_for_status())
-                .and_then(|r| r.json::<serde_json::Value>())
-                .map(|v| {
-                    v["ready"] == true
-                        && (*url != config.asr_url.trim_end_matches('/')
-                            || v["mode"] == config.asr_mode)
-                })
-                .unwrap_or(false)
         });
-        if ready {
-            let name = crate::config::ASR_MODES
-                .iter()
-                .find(|(mode, _)| *mode == config.asr_mode)
-                .map(|(_, label)| *label)
-                .unwrap_or("未知模型");
-            return Ok(format!(
-                "识别已就绪 · {name}；朗读{}",
-                if config.tts_enabled {
-                    "已开启"
-                } else {
-                    "已关闭"
-                }
-            ));
+        let invalid = Config {
+            asr_mode: "invalid-test-mode".into(),
+            ..Config::default()
+        };
+        manager.send(Operation::Start(invalid.clone()));
+        wait_entered.recv_timeout(Duration::from_secs(3)).unwrap();
+        let revision = REVISION.load(Ordering::SeqCst);
+        manager.send(Operation::Stop);
+        assert!(
+            REVISION.load(Ordering::SeqCst) > revision,
+            "Stop waited for the blocked manager queue before invalidating work"
+        );
+        manager.send(Operation::Start(invalid));
+        release.send(()).unwrap();
+        let message = wait_completed.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(message.contains("识别模式无效"), "{message}");
+    }
+
+    #[test]
+    fn native_model_selection_supports_only_installed_backend_types() {
+        for (mode, _) in crate::config::ASR_MODES {
+            assert!(managed(&Config {
+                asr_mode: (*mode).into(),
+                ..Config::default()
+            }));
         }
-        if Instant::now() >= deadline {
-            bail!("服务在十分钟内未就绪；首次启动需下载模型，请查看 native-asr.log");
+        assert!(!managed(&Config {
+            asr_mode: "unknown".into(),
+            ..Config::default()
+        }));
+    }
+
+    #[test]
+    fn qwen_response_preserves_mixed_terms_and_numeric_corrections() {
+        let text = "把 AGV 的 Blueprint 导入 UE，坐标 12，不对，改成 21。";
+        let value = json!({"choices": [{"finish_reason": "stop", "message": {
+            "content": format!("language Chinese<asr_text>{text}")
+        }}]});
+        assert_eq!(parse_qwen_response(&value).unwrap(), text);
+    }
+
+    #[test]
+    fn qwen_rejects_truncation_or_an_unparseable_response() {
+        for value in [
+            json!({"choices": [{"finish_reason": "length", "message": {"content": "<asr_text>部分"}}]}),
+            json!({"choices": [{"finish_reason": "stop", "message": {"content": "unframed"}}]}),
+            json!({"choices": []}),
+        ] {
+            assert!(parse_qwen_response(&value).is_err());
         }
-        thread::sleep(Duration::from_millis(500));
     }
 }

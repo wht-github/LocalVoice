@@ -154,33 +154,6 @@ pub fn fixture() -> Result<()> {
         Ok(())
     }
 }
-pub fn selection_check(expected_pid: u32, expected: &str, output: &str) -> Result<()> {
-    unsafe {
-        let mut pid = 0;
-        GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut pid));
-        ensure!(
-            pid == expected_pid,
-            "Foreground changed; selection not read"
-        );
-    }
-    let started = Instant::now();
-    let result = crate::native::Automation::new()?.selection();
-    let report = match result {
-        Ok(text) => {
-            serde_json::json!({"matches":text.split_whitespace().collect::<Vec<_>>().join(" ")==expected,
-                "characters":text.chars().count(),"expected_characters":expected.chars().count(),
-                "whitespace_codepoints":text.chars().filter(|c| c.is_whitespace()).map(|c| c as u32).collect::<Vec<_>>(),
-                "elapsed_ms":started.elapsed().as_millis(),"note":"Read selected range only; no clipboard changes or playback"})
-        }
-        Err(error) => serde_json::json!({"matches":false,"error":error.to_string()}),
-    };
-    std::fs::write(output, serde_json::to_vec_pretty(&report)?)?;
-    ensure!(
-        report["matches"] == true,
-        "Selected text did not match the known fixture"
-    );
-    Ok(())
-}
 unsafe fn text(window: HWND) -> String {
     unsafe {
         let mut buffer = vec![0u16; 4096];
@@ -272,11 +245,6 @@ pub fn native_check(expected_pid: u32, output: &str) -> Result<()> {
             "Test fixture is not focused; no input was sent"
         );
         let automation = crate::native::Automation::new().context("automation initialization")?;
-        let selection = automation.selection().context("selection read")?;
-        ensure!(
-            selection == "测试选区 Hello world",
-            "Selected text mismatch: {selection}"
-        );
         let target = automation.target().context("capture editable target")?;
         let focus_timer = Instant::now();
         for _ in 0..100 {
@@ -340,8 +308,7 @@ pub fn native_check(expected_pid: u32, output: &str) -> Result<()> {
             text(GetDlgItem(Some(window), 103)?) == "自绘输入 Hello",
             "Custom editor delivery failed"
         );
-        crate::native::register_keys("Ctrl+Alt+Space", "Ctrl+Alt+R")
-            .context("hotkey registration")?;
+        crate::native::register_keys("Ctrl+Alt+Space").context("hotkey registration")?;
         let keys = [
             (VK_CONTROL, false),
             (VK_MENU, false),
@@ -652,7 +619,7 @@ pub fn display_check(directory: &str, unpatched: bool) -> Result<()> {
                         ensure!(GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor).as_bool());
                     }
                     let scale = window.scale_factor();
-                    let expected = if is_settings { (450.,640.) } else { (380.,102.) };
+                    let expected = if is_settings { (560.,640.) } else { (380.,166.) };
                     let size_ok = client.right == (expected.0 * scale).round() as i32 && client.bottom == (expected.1 * scale).round() as i32;
                     let visible = rect.left >= monitor.rcWork.left && rect.top >= monitor.rcWork.top && rect.right <= monitor.rcWork.right && rect.bottom <= monitor.rcWork.bottom;
                     reports.borrow_mut().push(serde_json::json!({"settings":is_settings,"dpi":dpi,"offscreen":offscreen,"scale":scale,
@@ -927,7 +894,7 @@ pub fn floating_check(directory: &str, unpatched: bool) -> Result<()> {
                     let no_activate = style & WS_EX_NOACTIVATE.0 as isize != 0;
                     let topmost = style & WS_EX_TOPMOST.0 as isize != 0;
                     let scale = ui.window().scale_factor();
-                    let expected = if case.compact() { (64., 64.) } else if case.pending() { (380., 138.) } else { (380., 102.) };
+                    let expected = if case.compact() { (64., 64.) } else if case.pending() { (380., 202.) } else { (380., 166.) };
                     let size_ok = client.right == (expected.0 * scale).round() as i32
                         && client.bottom == (expected.1 * scale).round() as i32;
                     let region = CreateRectRgn(0, 0, 0, 0);
@@ -1116,7 +1083,7 @@ pub fn interaction_check(directory: &str) -> Result<()> {
                 4 => {
                     ensure!(!ui.get_compact(), "Pending result must keep panel open");
                     let size = ui.window().size().to_logical(ui.window().scale_factor());
-                    ensure!((size.height - 138.).abs() < 1., "Pending result must expand panel height: {size:?}");
+                    ensure!((size.height - 202.).abs() < 1., "Pending result must expand panel height: {size:?}");
                     ui.set_has_pending(false);
                 }
                 5 => {
@@ -1161,219 +1128,473 @@ pub fn interaction_check(directory: &str) -> Result<()> {
     Ok(())
 }
 
-/// Exercise the same manager and HTTP path as settings Save without changing
-/// settings or sending recognized text to another application.
-pub fn asr_models_check(audio: &str, output: &str) -> Result<()> {
-    use crate::runtime::{Operation, apply};
-    let client = crate::service::client()?;
-    ensure!(
-        client.get("http://127.0.0.1:8001/health").send().is_err(),
-        "Exit the daily client and release port 8001 before this check"
-    );
-    let result = (|| -> Result<Vec<serde_json::Value>> {
-        let mut reports = Vec::new();
-        for mode in [
-            "sensevoice-cpu",
-            "qwen-llama-0.6b",
-            "qwen-llama-1.7b",
-            "sensevoice-cpu",
-        ] {
-            let config = crate::config::Config {
-                asr_mode: mode.into(),
-                tts_enabled: false,
-                ..crate::config::Config::default()
-            };
-            let startup = apply(Operation::Start(config.clone()), || false)?;
-            crate::service::ready(&config)?;
-            apply(Operation::Start(config.clone()), || false)?;
-            let transcript =
-                crate::service::transcribe_timed(&client, &config, std::fs::read(audio)?)?;
-            ensure!(
-                !transcript.text.is_empty(),
-                "Empty transcription from {mode}"
-            );
-            let health: serde_json::Value = client
-                .get(format!("{}/health", config.asr_url))
-                .send()?
-                .json()?;
-            ensure!(health["mode"] == mode, "Wrong backend after switch");
-            ensure!(
-                health["device"]
-                    == if mode == "sensevoice-cpu" {
-                        "cpu"
-                    } else {
-                        "cuda:0"
-                    },
-                "Wrong device"
-            );
-            reports.push(serde_json::json!({"startup":startup,"health":health,
-                "text":transcript.text,"request_seconds":transcript.request_seconds,
-                "inference_seconds":transcript.inference_seconds}));
-        }
-        apply(Operation::Stop, || false)?;
-        ensure!(
-            client.get("http://127.0.0.1:8001/health").send().is_err(),
-            "ASR survived Stop"
-        );
-        Ok(reports)
-    })();
-    crate::runtime::native_stop();
-    std::fs::write(output, serde_json::to_vec_pretty(&result?)?)?;
-    Ok(())
-}
-
-pub fn runtime_check(output: &str) -> Result<()> {
-    use crate::runtime::{Operation, apply};
-    let config = crate::config::Config::load()?;
-    ensure!(
-        crate::runtime::managed(&config),
-        "Test requires the dedicated LocalVoice endpoints"
-    );
-    let client = reqwest::blocking::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(2))
-        .build()?;
-    let online = |url: &str| {
-        client
-            .get(format!("{url}/health"))
-            .send()
-            .and_then(|r| r.error_for_status())
-            .is_ok()
+/// Check the floating window against an overlapping ordinary window owned by
+/// this process. Neither fixture activates or sends input to other applications.
+pub fn topmost_check(directory: &str) -> Result<()> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use slint::{ComponentHandle, winit_030::WinitWindowAccessor};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
     };
-    let asr_pid = || -> Result<String> {
-        use std::os::windows::process::CommandExt;
-        let output = std::process::Command::new("wsl.exe")
-            .args([
-                "-d",
-                "LocalVoice",
-                "-u",
-                "root",
-                "--",
-                "systemctl",
-                "show",
-                "local-voice-asr",
-                "-p",
-                "MainPID",
-                "--value",
-            ])
-            .env("WSL_UTF8", "1")
-            .creation_flags(0x08000000)
-            .output()?;
-        ensure!(output.status.success(), "Could not inspect ASR process");
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-    };
-    let mut enabled = config.clone();
-    enabled.tts_enabled = true;
-    apply(Operation::Start(enabled.clone()), || false)?;
-    let pid = asr_pid()?;
-    let mut disabled = config.clone();
-    disabled.tts_enabled = false;
-    let result = (|| -> Result<serde_json::Value> {
-        apply(Operation::Tts(disabled.clone()), || false)?;
-        ensure!(!online(&config.tts_url), "TTS still running after disable");
-        crate::service::ready(&disabled)?;
-        ensure!(pid == asr_pid()?, "Disabling TTS restarted ASR");
-        apply(Operation::Start(disabled.clone()), || false)?;
-        ensure!(
-            !online(&config.tts_url),
-            "Start ignored disabled TTS preference"
-        );
-        ensure!(pid == asr_pid()?, "Start needlessly restarted ASR");
-        apply(Operation::Stop, || false)?;
-        ensure!(
-            !online(&config.asr_url) && !online(&config.tts_url),
-            "Stop all left a service running"
-        );
-        Ok(
-            serde_json::json!({"tts_disabled_releases_process":true,"asr_process_preserved":true,
-            "start_respects_tts_disabled":true,"stop_all_closes_both_ports":true}),
-        )
-    })();
-    // Restore enabled services even when an assertion fails; never change user settings.
-    let restored = apply(Operation::Start(enabled), || false);
-    let mut report = result?;
-    restored?;
-    report["restart_both_ready"] = true.into();
-    std::fs::write(output, serde_json::to_vec_pretty(&report)?)?;
-    Ok(())
-}
+    use windows::Win32::UI::Shell::RemoveWindowSubclass;
 
-pub fn long_tts(output: &str) -> Result<()> {
-    let config = crate::config::Config::load()?;
-    let client = crate::service::client()?;
-    let paragraph = "这是一段用于验证长文本自动朗读的内容，我们会保留原有的语序，在完整的句子结束时分段处理；如果一个句子比较长，就优先寻找逗号和合适的词语边界，让中文和 English 文本都能够依次交给语音服务。\nDr. Smith checks version 3.14 at example.com, and the application reads each sentence in its original order without requiring manual splitting.\n\n";
-    let text = paragraph.repeat(9);
-    ensure!(
-        text.chars().count() > 2000,
-        "Fixture must exceed a single API request limit"
-    );
-    let parts = crate::text::segments(&text);
-    ensure!(parts.concat() == text, "Segmentation changed the input");
-    let started = Instant::now();
-    let mut reports = Vec::new();
-    for (index, part) in parts.iter().enumerate() {
-        if part.trim().is_empty() {
-            continue;
+    struct Cover(HWND);
+    impl Drop for Cover {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = DestroyWindow(self.0);
+            }
         }
-        ensure!(
-            part.chars().count() <= crate::text::CHUNK_CHARS,
-            "Chunk too long"
-        );
-        let response = client
-            .post(format!("{}/v1/audio/speech", config.tts_url))
-            .json(&serde_json::json!({"input":part,"voice":config.voice,"speed":config.speed}))
-            .send()?
-            .error_for_status()?;
-        let bytes = response.bytes()?;
-        let mut reader = hound::WavReader::new(std::io::Cursor::new(&bytes))?;
-        let duration = reader.duration();
-        ensure!(
-            duration > 0 && reader.spec().sample_rate == 24000,
-            "Invalid WAV at chunk {}",
-            index + 1
-        );
-        ensure!(
-            reader
-                .samples::<i16>()
-                .any(|sample| sample.is_ok_and(|value| value != 0)),
-            "Silent WAV"
-        );
-        reports.push(serde_json::json!({"segment":index+1,"characters":part.chars().count(),"audio_seconds":duration as f64 / 24000.}));
     }
+    struct Order {
+        floating: HWND,
+        cover: HWND,
+        first: HWND,
+    }
+    unsafe extern "system" fn first_fixture(window: HWND, data: LPARAM) -> windows::core::BOOL {
+        let order = unsafe { &mut *(data.0 as *mut Order) };
+        if window == order.floating || window == order.cover {
+            order.first = window;
+            return windows::core::BOOL(0);
+        }
+        windows::core::BOOL(1)
+    }
+
+    let backend = i_slint_backend_winit::Backend::builder()
+        .with_renderer_name(crate::ui::RENDERER)
+        .with_window_attributes_hook(|attributes| {
+            use slint::winit_030::winit::platform::windows::WindowAttributesExtWindows;
+            attributes.with_active(false).with_skip_taskbar(true)
+        })
+        .build()?;
+    slint::platform::set_platform(Box::new(backend))?;
+    let ui = crate::VoiceWindow::new()?;
+    let presentation = crate::ui::Presentation::new(&ui);
+    let weak = ui.as_weak();
+    let mut floating = crate::ui::FloatingState::default();
+    ui.window().on_winit_window_event(move |_, event| {
+        if let Some(ui) = weak.upgrade() {
+            floating.event(&ui, event);
+        }
+        i_slint_backend_winit::EventResult::Propagate
+    });
+    let foreground = unsafe { GetForegroundWindow() };
+    presentation.show_ball()?;
+    // No owner: an owned popup would inherit its topmost owner's Z-order band.
+    let cover = Cover(unsafe {
+        CreateWindowExW(
+            WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            w!("STATIC"),
+            w!("Local Voice ordinary-window fixture"),
+            WS_POPUP,
+            0,
+            0,
+            64,
+            64,
+            None,
+            None,
+            Some(GetModuleHandleW(None)?.into()),
+            None,
+        )?
+    });
+    ensure!(
+        unsafe { GetForegroundWindow() } == foreground,
+        "Fixture startup stole focus"
+    );
+    let output = std::path::PathBuf::from(directory);
+    std::fs::create_dir_all(&output)?;
+    let cases = [
+        "startup-ball",
+        "panel",
+        "collapse",
+        "hide-show",
+        "display",
+        "resume",
+        "demotion-blocked",
+        "guard-removed-ablation",
+    ];
+    let step = Cell::new(0usize);
+    let reports = RefCell::new(Vec::new());
+    let failure = Rc::new(RefCell::new(None));
+    let error = failure.clone();
+    let weak = ui.as_weak();
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, Duration::from_millis(350), move || {
+        let checked = (|| -> Result<()> {
+            let ui = weak.upgrade().context("Topmost fixture closed")?;
+            let mut hwnd = HWND::default();
+            ui.window().with_winit_window(|window| {
+                if let Ok(handle) = window.window_handle() {
+                    if let RawWindowHandle::Win32(handle) = handle.as_raw() {
+                        hwnd = HWND(handle.hwnd.get() as *mut _);
+                    }
+                }
+            });
+            unsafe {
+                for window in [hwnd, cover.0] {
+                    let mut pid = 0;
+                    GetWindowThreadProcessId(window, Some(&mut pid));
+                    ensure!(pid == windows::Win32::System::Threading::GetCurrentProcessId(), "Only manipulate owned fixtures");
+                }
+            }
+            let index = step.get() / 2;
+            let foreground = unsafe { GetForegroundWindow() };
+            ensure!(foreground != hwnd && foreground != cover.0, "Fixture took foreground focus");
+            if step.get() % 2 == 0 {
+                match index {
+                    0 => ensure!(ui.get_compact(), "Startup must show the ball"),
+                    1 => presentation.show_panel()?,
+                    2 => presentation.show_ball()?,
+                    3 => { presentation.hide()?; presentation.show_ball()?; }
+                    4 => unsafe { SendMessageW(hwnd, WM_DISPLAYCHANGE, Some(WPARAM(32)), Some(LPARAM(0))); },
+                    5 => unsafe { SendMessageW(hwnd, WM_POWERBROADCAST, Some(WPARAM(PBT_APMRESUMEAUTOMATIC as usize)), Some(LPARAM(0))); },
+                    6 | 7 => unsafe {
+                        if index == 7 {
+                            ensure!(RemoveWindowSubclass(hwnd, Some(crate::native::no_activate), 1).as_bool(), "Remove the guard only on the owned fixture");
+                        }
+                        SetWindowPos(hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)?;
+                    },
+                    _ => unreachable!(),
+                }
+            } else {
+                let row = unsafe {
+                    let mut rect = RECT::default();
+                    GetWindowRect(hwnd, &mut rect)?;
+                    // Move the ordinary window directly over the floating fixture,
+                    // then raise it without activating either window.
+                    SetWindowPos(cover.0, Some(HWND_TOP), rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_SHOWWINDOW | SWP_NOACTIVATE)?;
+                    let mut order = Order { floating: hwnd, cover: cover.0, first: HWND::default() };
+                    let _ = EnumWindows(Some(first_fixture), LPARAM(&mut order as *mut _ as isize));
+                    ensure!(!order.first.is_invalid(), "Fixture absent from desktop Z order");
+                    let topmost = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST.0 as isize != 0;
+                    let cover_topmost = GetWindowLongPtrW(cover.0, GWL_EXSTYLE) & WS_EX_TOPMOST.0 as isize != 0;
+                    let above_cover = order.first == hwnd;
+                    let visible = IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool();
+                    let foreground_unchanged = GetForegroundWindow() == foreground;
+                    let ablation = index == 7;
+                    let passed = visible && !cover_topmost && foreground_unchanged
+                        && if ablation { !topmost && !above_cover } else { topmost && above_cover };
+                    if ablation {
+                        crate::native::floating(hwnd);
+                    }
+                    serde_json::json!({
+                        "case": cases[index], "passed": passed, "visible": visible,
+                        "topmost": topmost, "above_ordinary_cover": above_cover,
+                        "cover_topmost": cover_topmost, "foreground_unchanged": foreground_unchanged,
+                        "ablation": ablation,
+                    })
+                };
+                reports.borrow_mut().push(row);
+                let all_passed = reports.borrow().iter().all(|row| row["passed"] == true);
+                std::fs::write(output.join("result.json"), serde_json::to_vec_pretty(&serde_json::json!({
+                    "all_passed": all_passed, "complete": index + 1 == cases.len(), "cases": *reports.borrow(),
+                    "note": "Owned fixtures only; ordinary overlapping window raised without activation. Display/resume messages are synthetic. Final ablation removes the floating guard before demotion, then restores it. No services, audio, mouse, keyboard, or user-window changes."
+                }))?)?;
+                ensure!(all_passed, "Topmost regression; see result.json");
+                if index + 1 == cases.len() {
+                    slint::quit_event_loop()?;
+                }
+            }
+            ensure!(unsafe { GetForegroundWindow() } == foreground, "Topmost check stole foreground focus");
+            step.set(step.get() + 1);
+            Ok(())
+        })();
+        if let Err(failure) = checked {
+            let message = format!("{failure:#}");
+            let _ = std::fs::write(output.join("error.txt"), &message);
+            *error.borrow_mut() = Some(message);
+            let _ = slint::quit_event_loop();
+        }
+    });
+    slint::run_event_loop_until_quit()?;
+    if let Some(error) = failure.borrow_mut().take() {
+        bail!(error);
+    }
+    Ok(())
+}
+
+/// Render product states with fixed text only. This entry point bypasses the
+/// controller, services, microphone, hotkeys, clipboard, and external input.
+pub fn dictation_ui_check(directory: &str) -> Result<()> {
+    use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
+
+    fn snapshot(window: &slint::Window, path: &std::path::Path) -> Result<serde_json::Value> {
+        let frame = window.take_snapshot()?;
+        let mut encoder =
+            png::Encoder::new(std::fs::File::create(path)?, frame.width(), frame.height());
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header()?.write_image_data(frame.as_bytes())?;
+        let logical = window.size().to_logical(window.scale_factor());
+        Ok(serde_json::json!({
+            "file": path.file_name().and_then(|name| name.to_str()),
+            "physical_size": [frame.width(), frame.height()],
+            "logical_size": [logical.width, logical.height],
+            "scale": window.scale_factor(),
+        }))
+    }
+
+    let backend = i_slint_backend_winit::Backend::builder()
+        .with_renderer_name(crate::ui::RENDERER)
+        .with_window_attributes_hook(|attributes| {
+            use slint::winit_030::winit::platform::windows::WindowAttributesExtWindows;
+            attributes.with_active(false).with_skip_taskbar(true)
+        })
+        .build()?;
+    slint::platform::set_platform(Box::new(backend))?;
+    let ui = crate::VoiceWindow::new()?;
+    let settings = crate::SettingsWindow::new()?;
+    let result = crate::ResultWindow::new()?;
+    ui.set_animation_enabled(false);
+    settings.set_asr_modes(ModelRc::new(VecModel::from(
+        crate::config::ASR_MODES
+            .iter()
+            .map(|(_, label)| SharedString::from(*label))
+            .collect::<Vec<_>>(),
+    )));
+    settings.set_asr_mode_index(2);
+    settings.set_microphones(ModelRc::new(VecModel::from(vec![SharedString::from(
+        "系统默认麦克风",
+    )])));
+    settings.set_record_key("Ctrl+Alt+Space".into());
+    settings.set_continuous_dictation(true);
+    settings.set_terms_text("".into());
+    settings.set_app_version("本地试用".into());
+    settings.set_text_installed(true);
+    settings.set_text_ready(false);
+    settings
+        .set_text_status("模型已安装，当前未占用模型内存；下次整理自动加载，也可提前预加载".into());
+    settings.set_service_status("Qwen ASR 1.7B · 服务已就绪（固定界面示例）".into());
+    let original = "嗯，我觉得这个 attention 算子，主要是那个 memory bandwidth 的问题。不是计算量不够，是访存。然后可以先试一下 fusion，不过这个还得测。\n\n版本先用 2.1，不，还是 2.2。KV cache 保留 BF16，不要改成 FP16。这里没有确定结论，需要比较峰值显存和 p95 延迟。".repeat(8);
+    let notes = "我认为这个 attention 算子主要存在 memory bandwidth 问题。不是计算量不足，而是访存问题。可以先尝试 fusion，但还需要测试。\n\n版本从 2.1 改为 2.2。KV cache 保留 BF16，不要改成 FP16。目前没有确定结论，需要比较峰值显存和 p95 延迟。\n\n".repeat(8);
+    result.set_original(original.clone().into());
+    result.set_result(notes.clone().into());
+    result.set_output_mode("notes".into());
+    result.set_retryable(true);
+    result.set_notice("笔记正文已整理，原始转写仍可查看和复制".into());
+    let output = std::path::PathBuf::from(directory);
+    std::fs::create_dir_all(&output)?;
+    let weak_ui = ui.as_weak();
+    let weak_settings = settings.as_weak();
+    let weak_result = result.as_weak();
+    let cases = [
+        "panel-raw",
+        "panel-clean",
+        "panel-notes-busy",
+        "panel-pending",
+        "settings",
+        "settings-bottom",
+        "settings-small",
+        "settings-small-bottom",
+        "result",
+        "result-small",
+        "result-small-bottom",
+        "result-retry",
+    ];
+    let step = Cell::new(0usize);
+    let reports = RefCell::new(Vec::new());
+    let failure = Rc::new(RefCell::new(None));
+    let error = failure.clone();
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, Duration::from_millis(350), move || {
+        let checked = (|| -> Result<()> {
+            let ui = weak_ui.upgrade().context("Panel fixture closed")?;
+            let settings = weak_settings.upgrade().context("Settings fixture closed")?;
+            let result = weak_result.upgrade().context("Result fixture closed")?;
+            let index = step.get() / 2;
+            let name = cases[index];
+            let window = if index < 4 { ui.window() } else if index < 8 { settings.window() } else { result.window() };
+            if step.get() % 2 == 0 {
+                let foreground = unsafe { GetForegroundWindow() };
+                ui.hide()?;
+                settings.hide()?;
+                result.hide()?;
+                if index < 4 {
+                    ui.set_compact(false);
+                    ui.set_output_mode(if index == 0 { "raw" } else if index == 1 { "clean" } else { "notes" }.into());
+                    ui.set_processing(index == 2);
+                    ui.set_has_pending(index == 3);
+                    ui.set_status(if index == 2 { "正在整理完整笔记…" } else if index == 3 { "输入目标已变化，结果保留在应用内" } else { "准备就绪 · 点击开始说话" }.into());
+                    window.set_size(slint::LogicalSize::new(380., if index == 3 { 202. } else { 166. }));
+                } else if index < 8 {
+                    window.set_size(slint::LogicalSize::new(if index < 6 { 560. } else { 420. }, if index < 6 { 640. } else { 400. }));
+                    settings.set_show_note_preview(index >= 6);
+                    settings.set_content_scroll_y(if index % 2 == 1 { -settings.get_content_scroll_range() } else { 0. });
+                } else {
+                    window.set_size(slint::LogicalSize::new(if index == 8 { 820. } else { 420. }, if index == 8 { 780. } else { 400. }));
+                    result.set_content_scroll_y(if index == 10 { -result.get_content_scroll_range() } else { 0. });
+                    if index == 11 {
+                        result.set_result(original.clone().into());
+                        result.set_retryable(true);
+                        result.set_notice("笔记整理未完成，本次使用原始转写。准备模型后可重新整理。".into());
+                    }
+                }
+                if index >= 8 {
+                    crate::ui::show_result(window, false)?;
+                } else {
+                    window.show()?;
+                }
+                crate::ui::mark_complete(window);
+                window.request_redraw();
+                ensure!(unsafe { GetForegroundWindow() } == foreground, "UI snapshot fixture changed foreground focus");
+            } else {
+                ensure!(result.get_original().as_str() == original, "Original text was truncated");
+                if index < 11 {
+                    ensure!(result.get_result().as_str() == notes, "Processed text was truncated");
+                }
+                let mut report = snapshot(window, &output.join(format!("{name}.png")))?;
+                report["case"] = name.into();
+                if index >= 4 && index < 8 {
+                    report["show_note_preview"] = settings.get_show_note_preview().into();
+                    report["scroll_range"] = settings.get_content_scroll_range().into();
+                    report["scroll_y"] = settings.get_content_scroll_y().into();
+                    ensure!(settings.get_content_scroll_range() > 0., "Settings content must be scrollable");
+                } else if index >= 8 {
+                    report["scroll_range"] = result.get_content_scroll_range().into();
+                    report["scroll_y"] = result.get_content_scroll_y().into();
+                }
+                reports.borrow_mut().push(report);
+                if index + 1 == cases.len() {
+                    std::fs::write(output.join("result.json"), serde_json::to_vec_pretty(&serde_json::json!({
+                        "passed": true,
+                        "cases": *reports.borrow(),
+                        "original_characters": original.chars().count(),
+                        "result_characters": notes.chars().count(),
+                        "note": "Fixed fixture text only. No controller, audio, HTTP, hotkeys, clipboard changes, user input, or foreground activation. Screenshots require visual review.",
+                    }))?)?;
+                    slint::quit_event_loop()?;
+                }
+            }
+            step.set(step.get() + 1);
+            Ok(())
+        })();
+        if let Err(failure) = checked {
+            let message = format!("{failure:#}");
+            let _ = std::fs::write(output.join("error.txt"), &message);
+            *error.borrow_mut() = Some(message);
+            let _ = slint::quit_event_loop();
+        }
+    });
+    slint::run_event_loop_until_quit()?;
+    if let Some(error) = failure.borrow_mut().take() {
+        bail!(error);
+    }
+    Ok(())
+}
+
+/// Each model diagnostic owns its native models and always closes them. It never
+/// attaches to, stops, or sends fixture content to a daily client's model server.
+struct NativeCheck;
+impl NativeCheck {
+    fn start(mode: &str) -> Result<crate::config::Config> {
+        let config = crate::config::Config {
+            asr_mode: mode.into(),
+            ..crate::config::Config::default()
+        };
+        crate::runtime::apply(crate::runtime::Operation::Start(config.clone()), || false)?;
+        crate::runtime::ready(&config)?;
+        Ok(config)
+    }
+}
+impl Drop for NativeCheck {
+    fn drop(&mut self) {
+        crate::runtime::native_stop();
+    }
+}
+
+/// Exercise model switching and repeated Start without reading saved settings.
+pub fn asr_models_check(audio: &str, output: &str) -> Result<()> {
+    native_models_check(audio, output, false)
+}
+
+/// Native ASR plus Agentic editing, using only a prerecorded fixture. No Python,
+/// microphone, clipboard, keyboard registration, or user app interaction.
+pub fn native_smoke(audio: &str, output: &str) -> Result<()> {
+    native_models_check(audio, output, true)
+}
+
+fn native_models_check(audio: &str, output: &str, edit: bool) -> Result<()> {
+    let _cleanup = NativeCheck;
+    let (samples, rate) = crate::service::decode_wav(&std::fs::read(audio)?)?;
+    ensure!(!samples.is_empty(), "Empty test fixture");
+    let mut reports = Vec::new();
+    for (index, mode) in ["sensevoice-cpu", "qwen-llama-0.6b", "sensevoice-cpu"]
+        .into_iter()
+        .enumerate()
+    {
+        let startup = Instant::now();
+        let mut config = NativeCheck::start(mode)?;
+        let startup_seconds = startup.elapsed().as_secs_f64();
+        // An unchanged model remains usable when Start is requested twice.
+        crate::runtime::apply(crate::runtime::Operation::Start(config.clone()), || false)?;
+        let transcript =
+            crate::service::transcribe_recording(&config, &samples, rate, || false, |_, _| {})?;
+        ensure!(
+            !transcript.text.trim().is_empty(),
+            "Empty transcription from {mode}"
+        );
+        let mut report = serde_json::json!({
+            "mode":mode, "startup_seconds":startup_seconds,
+            "original":transcript.text, "recognition_seconds":transcript.request_seconds,
+            "sample_rate":rate, "audio_seconds":samples.len() as f64 / rate as f64,
+        });
+        if edit && index < 2 {
+            ensure!(
+                crate::service::text_status(&config)?.installed,
+                "Prepare the Agentic model in Settings before the native smoke check"
+            );
+            config.output_mode = "clean".into();
+            let result = crate::service::process_transcript(&config, transcript, false, || false)?;
+            ensure!(
+                result.warning.is_none(),
+                "Editing fell back: {:?}",
+                result.warning
+            );
+            ensure!(!result.text.trim().is_empty(), "Empty edited body");
+            ensure!(
+                !result.preview_only,
+                "Daily input unexpectedly requires a preview"
+            );
+            report["edited"] = result.text.into();
+            report["editing_seconds"] = result.processing_seconds.into();
+        }
+        reports.push(report);
+    }
+    crate::runtime::apply(crate::runtime::Operation::Stop, || false)?;
+    ensure!(
+        crate::runtime::ready(&crate::config::Config::default()).is_err(),
+        "ASR stayed available after Stop"
+    );
+    ensure!(
+        !crate::service::text_status(&crate::config::Config::default())?.ready,
+        "Editor stayed ready after Stop"
+    );
     std::fs::write(
         output,
         serde_json::to_vec_pretty(&serde_json::json!({
-            "input_characters":text.chars().count(),"lossless":true,"segments":reports,
-            "elapsed_seconds":started.elapsed().as_secs_f64(),
-            "note":"Every segment synthesized and WAV validated; no microphone capture or speaker playback"
+            "passed":true, "runtime":"native", "process_id":std::process::id(),
+            "cases":reports, "stopped":true,
+            "note":"Owned SenseVoice/Qwen 0.6B models only. The daily Qwen 1.7B process, saved settings, microphone, clipboard, and foreground apps are untouched. Text quality requires reading the complete bodies."
         }))?,
     )?;
     Ok(())
 }
 
 pub fn manual_asr(input: &str, output: &str) -> Result<()> {
-    let mut reader = hound::WavReader::open(input)?;
-    ensure!(
-        reader.spec().channels == 1 && reader.spec().sample_rate == 24000,
-        "Use 24 kHz mono fixture"
-    );
-    let original: Vec<f32> = reader
-        .samples::<i16>()
-        .map(|s| s.map(|v| v as f32 / 32768.))
-        .collect::<std::result::Result<_, _>>()?;
+    let _cleanup = NativeCheck;
+    let (original, source_rate) = crate::service::decode_wav(&std::fs::read(input)?)?;
     ensure!(!original.is_empty(), "Empty fixture");
-    let samples: Vec<f32> = original
-        .iter()
-        .cycle()
-        .take(24000 * 65)
-        .flat_map(|v| [*v, *v])
-        .collect();
-    let client = crate::service::client()?;
-    let config = crate::config::Config::load()?;
+    let original = crate::vad::resample_mono(&original, source_rate, 48000)?;
+    let samples: Vec<f32> = original.iter().copied().cycle().take(48000 * 65).collect();
+    let config = NativeCheck::start("sensevoice-cpu")?;
     let start = Instant::now();
     let mut requests = Vec::new();
     let result = crate::service::transcribe_recording(
-        &client,
         &config,
         &samples,
         48000,
@@ -1387,12 +1608,11 @@ pub fn manual_asr(input: &str, output: &str) -> Result<()> {
     let mut cancelled_progress = false;
     ensure!(
         crate::service::transcribe_recording(
-            &client,
             &config,
             &samples,
             48000,
             || true,
-            |_, _| cancelled_progress = true
+            |_, _| cancelled_progress = true,
         )
         .is_err()
             && !cancelled_progress,
@@ -1400,78 +1620,60 @@ pub fn manual_asr(input: &str, output: &str) -> Result<()> {
     );
     std::fs::write(
         output,
-        serde_json::to_vec_pretty(&serde_json::json!({"audio_seconds":65,
-        "sample_rate":48000,"requests":requests,"single_combined_result":result.text,
-        "cancel_before_upload":true,"elapsed_seconds":start.elapsed().as_secs_f64(),
-        "note":"Prerecorded fixture; no microphone capture and no insertion into user apps"}))?,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "runtime":"native", "mode":"sensevoice-cpu",
+            "audio_seconds":65, "sample_rate":48000, "requests":requests,
+            "single_combined_result":result.text, "cancel_before_recognition":true,
+            "elapsed_seconds":start.elapsed().as_secs_f64(),
+            "note":"Prerecorded fixture; no microphone capture or insertion into user apps."
+        }))?,
     )?;
     Ok(())
 }
 
 pub fn asr_latency(input: &str, output: &str) -> Result<()> {
-    let config = crate::config::Config::load()?;
-    let client = crate::service::client()?;
-    let mut reader = hound::WavReader::open(input)?;
-    ensure!(
-        reader.spec().channels == 1 && reader.spec().sample_rate == 24000,
-        "Use a 24 kHz mono test WAV"
-    );
-    let samples: Vec<f32> = reader
-        .samples::<i16>()
-        .map(|s| s.map(|v| v as f32 / 32768.))
-        .collect::<std::result::Result<_, _>>()?;
+    let _cleanup = NativeCheck;
+    let (samples, source_rate) = crate::service::decode_wav(&std::fs::read(input)?)?;
+    ensure!(!samples.is_empty(), "Empty fixture");
+    let config = NativeCheck::start("sensevoice-cpu")?;
     let mut reports = Vec::new();
     for copies in [1, 4] {
         for rate in [24000, 48000] {
-            // Repeated samples are a timing fixture for the microphone's 48 kHz
-            // upload path, not an audio-quality resampler used by the application.
-            let wave: Vec<f32> = samples
-                .repeat(copies)
-                .into_iter()
-                .flat_map(|s| std::iter::repeat_n(s, rate as usize / 24000))
-                .collect();
-            ensure!(
-                wave.len() < rate as usize * 30,
-                "Fixture exceeds API duration limit"
-            );
-            let encoding = Instant::now();
-            let wav = crate::audio::encode_wav(&wave, rate)?;
-            let encode_ms = encoding.elapsed().as_millis();
-            let result = crate::service::transcribe_timed(&client, &config, wav)?;
+            let wave = crate::vad::resample_mono(&samples.repeat(copies), source_rate, rate)?;
+            let result =
+                crate::service::transcribe_recording(&config, &wave, rate, || false, |_, _| {})?;
             ensure!(!result.text.trim().is_empty(), "Empty ASR result");
-            reports.push(serde_json::json!({"sample_rate":rate,"audio_seconds":wave.len() as f64 / rate as f64,"encode_ms":encode_ms,"http_seconds":result.request_seconds,"server_seconds":result.inference_seconds}));
+            reports.push(serde_json::json!({
+                "sample_rate":rate, "audio_seconds":wave.len() as f64/rate as f64,
+                "recognition_seconds":result.request_seconds, "text":result.text,
+            }));
         }
     }
     std::fs::write(
         output,
-        serde_json::to_vec_pretty(
-            &serde_json::json!({"cases":reports,"note":"Known test WAV replay through client encoding and HTTP, no microphone capture"}),
-        )?,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "runtime":"native", "mode":"sensevoice-cpu", "cases":reports,
+            "note":"Known test WAV through native resampling and recognition; no microphone capture."
+        }))?,
     )?;
     Ok(())
 }
 
-pub fn services(output: &str) -> Result<()> {
-    let config = crate::config::Config::load()?;
-    crate::service::ready(&config)?;
-    let client = crate::service::client()?;
-    let response=client.post(format!("{}/v1/audio/speech",config.tts_url)).json(&serde_json::json!({"input":"你好，这是 Windows 客户端测试。Hello, local voice.","voice":config.voice})).send()?.error_for_status()?;
-    let bytes = response.bytes()?.to_vec();
-    let reader = hound::WavReader::new(std::io::Cursor::new(&bytes))?;
-    ensure!(
-        reader.duration() > 0 && reader.spec().sample_rate == 24000,
-        "Invalid TTS WAV"
-    );
-    let seconds = reader.duration() as f64 / 24000.;
-    let text = crate::service::transcribe(&client, &config, bytes)?;
-    if text.trim().is_empty() {
-        bail!("Empty recognition");
-    }
+pub fn service_check(output: &str) -> Result<()> {
+    let _cleanup = NativeCheck;
+    let config = NativeCheck::start("sensevoice-cpu")?;
+    let fixture = crate::paths::root()?.join("tests/fixtures/ascend-01219.wav");
+    let bytes = std::fs::read(&fixture)
+        .with_context(|| format!("fixture missing: {}", fixture.display()))?;
+    let transcript = crate::service::transcribe_timed(&config, bytes)?;
+    ensure!(!transcript.text.trim().is_empty(), "Empty recognition");
     std::fs::write(
         output,
-        serde_json::to_vec_pretty(
-            &serde_json::json!({"asr_ready":true,"tts_ready":true,"tts_audio_seconds":seconds,"asr_text":text,"microphones":crate::audio::microphones(),"note":"No microphone recording and no speaker playback performed by this check"}),
-        )?,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "runtime":"native", "mode":"sensevoice-cpu", "asr_ready":true,
+            "asr_text":transcript.text, "recognition_seconds":transcript.request_seconds,
+            "note":"Owned native SenseVoice with prerecorded fixture. No microphone recording or external application interaction."
+        }))?,
     )?;
     Ok(())
 }

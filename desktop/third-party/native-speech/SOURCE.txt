@@ -1,0 +1,14 @@
+Native speech runtime bundled with the Windows desktop application:
+
+sherpa-onnx 1.13.8
+https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.13.8
+https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v1.13.8/LICENSE
+
+ONNX Runtime 1.28.2 (version reported by the DLL bundled in the sherpa-onnx
+1.13.8 Windows x64 shared MT release archive)
+https://raw.githubusercontent.com/microsoft/onnxruntime/v1.28.2/LICENSE
+https://raw.githubusercontent.com/microsoft/onnxruntime/v1.28.2/ThirdPartyNotices.txt
+
+The package script includes all DLL files from the Cargo release directory.
+llama.cpp and model weights are installed separately by checksum-verified
+preparation scripts; they are not part of the desktop ZIP.

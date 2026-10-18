@@ -1,5 +1,7 @@
 # 桌面识别模型部署
 
+> 以下保留先前 Python 适配服务的部署与实测记录。2026-10-18 起，桌面直接管理 llama.cpp，SenseVoice 改用 sherpa-onnx INT8；当前安装见 [install.md](../install.md)，运行结构见 [原生运行说明](native-runtime.md)。旧端口与 Python 命令不用于新版应用。
+
 ## 固定的标准部署
 
 - llama.cpp：[官方 v0.4.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.4.0) 指向 [b10809](https://github.com/ggml-org/llama.cpp/releases/tag/b10809)，本项目选择 Windows CUDA 13.3 x64 包和同版本 cudart 包。
@@ -42,4 +44,4 @@ $asrPython = Join-Path $PWD '.venv/Scripts/python.exe'
 - 8001 端口被旧服务占用：从启动该服务的程序停止它，再启动悬浮窗。
 - 新机器首次 SenseVoice 加载较慢：等待模型下载和预热；后续复用 `.runtime/cache/huggingface` 缓存。
 
-本轮移除了 CUDA PyTorch、TileLang、Nsight、本地 llama 源码编译路径与量化对照。系统 Visual Studio、NVIDIA 驱动、其他项目和可选朗读部署不属于清理范围。Git 已记录的实验代码和汇总结果可从 `archive/asr-optimization-20260913` 恢复；未进 Git 的旧原始 trace、日志和评测缓存已按用户确认永久删除，标签不包含它们。
+本轮移除了 CUDA PyTorch、TileLang、Nsight、本地 llama 源码编译路径与量化对照（后续可选朗读部署也已整体移除）。SenseVoice 换 sherpa-onnx、Qwen 保留 llama.cpp 的引擎选型与依据见 [识别引擎选型](asr-engine-selection.md)。系统 Visual Studio、NVIDIA 驱动和其他项目不属于清理范围。Git 已记录的实验代码和汇总结果可从 `archive/asr-optimization-20260913` 恢复；未进 Git 的旧原始 trace、日志和评测缓存已按用户确认永久删除，标签不包含它们。

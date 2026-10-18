@@ -1,0 +1,1 @@
+{"id":"personal-short-001","split":"dev","source":"user_recorded_audio","audio":"personal/short-001.wav","language":"auto","reference":"请替换为忠实于真实录音的逐字参考文本，不要先做口语整理。","expected_terms":[{"text":"AGV","count":1},{"text":"blueprint","count":1},{"text":"UE","count":1},{"text":"transition","count":1}],"review_checks":["录入前按真实音频重写参考文本、术语与出现次数","检查否定、数字、条件、不确定性及口头修正"]}

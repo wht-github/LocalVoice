@@ -1,4 +1,4 @@
-param([int]$TargetPid, [long]$TargetWindow, [string]$TargetClass, [string]$ReportName, [string]$SelectedText)
+param([int]$TargetPid, [long]$TargetWindow, [string]$TargetClass, [string]$ReportName)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $clientExe = Join-Path $projectRoot 'desktop\target\debug\local-voice-desktop.exe'
@@ -36,14 +36,8 @@ if (!$editor) {
 if (!$editor) { throw 'Specified input control not found.' }
 $null = [VoiceClickProbe]::SetForegroundWindow([IntPtr]$TargetWindow)
 $editor.SetFocus()
-if ($SelectedText) {
-    $pattern = $editor.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
-    $range = $pattern.DocumentRange.FindText($SelectedText,$false,$false)
-    if (!$range) { throw 'Known selection fixture not found.' }
-    $range.Select()
-}
 # Diagnostic mode exits on Record and never starts a microphone or sends text.
-$arguments = if ($SelectedText) { @('--selection-click-check',"$TargetPid",('"'+$SelectedText+'"'),$report) } else { @('--target-click-check',"$TargetPid",$report) }
+$arguments = @('--target-click-check',"$TargetPid",$report)
 $probe = Start-Process -FilePath $clientExe -ArgumentList $arguments -WindowStyle Hidden -PassThru
 try {
     Start-Sleep -Seconds 2
@@ -55,7 +49,7 @@ try {
     $rect = New-Object VoiceClickProbe+Rect
     $null = [VoiceClickProbe]::GetClientRect($window,[ref]$rect)
     $point = New-Object VoiceClickProbe+Point
-    $buttonCenter = if ($SelectedText) { 224 } else { 150 }
+    $buttonCenter = 150
     $point.X = [int]($rect.Right * $buttonCenter / 380)
     $point.Y = [int]($rect.Right * 28 / 380)
     $null = [VoiceClickProbe]::ClientToScreen($window,[ref]$point)

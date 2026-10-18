@@ -7,7 +7,8 @@ fn find_root(executable: &Path) -> Option<PathBuf> {
         .ancestors()
         .skip(1)
         .find(|directory| {
-            directory.join("asr_server.py").is_file() && directory.join("desktop.ps1").is_file()
+            directory.join("desktop/Cargo.toml").is_file()
+                && directory.join("desktop.ps1").is_file()
         })
         .map(Path::to_path_buf)
 }

@@ -1,22 +1,24 @@
 [package]
 name = "local-voice-desktop"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 publish = false
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
+sha2 = "0.10"
+sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
 png = "0.18"
 slint = { version = "=1.17.1", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "renderer-software", "compat-1-2", "unstable-winit-030", "raw-window-handle-06"] }
 i-slint-backend-winit = { version = "=1.17.1", default-features = false, features = ["renderer-femtovg", "renderer-software"] }
 # Pinned with Slint: invalidate the software surface after restore/display changes.
 i-slint-core = { version = "=1.17.1", default-features = false }
 raw-window-handle = "0.6"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_System_LibraryLoader"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Security", "Win32_System_ProcessStatus", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_System_LibraryLoader"] }
 cpal = "0.15"
-rodio = { version = "0.20", default-features = false, features = ["wav"] }
 hound = "3.5"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 arboard = { version = "3", default-features = false }

@@ -1,6 +1,6 @@
 # Normalize text files in the repo; keep platform-critical endings fixed.
 * text=auto
-# Shell and Python files are piped into the LocalVoice WSL distro; CRLF breaks them.
+# Keep portable scripts and historical research files on LF.
 *.sh text eol=lf
 *.py text eol=lf
 uv.toml text eol=lf
@@ -9,3 +9,5 @@ uv.toml text eol=lf
 *.png binary
 *.wav binary
 *.tar binary
+# Preserve whitespace in the upstream model template used as an exact fixture.
+tests/fixtures/dictation/agentic-author-chat_template.jinja -whitespace

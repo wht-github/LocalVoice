@@ -1,5 +1,6 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 // Order shared by settings display and persistence.
@@ -9,38 +10,127 @@ pub const ASR_MODES: &[(&str, &str)] = &[
     ("qwen-llama-1.7b", "llama · Qwen ASR 1.7B Q8"),
 ];
 
+pub const OUTPUT_MODES: &[(&str, &str)] = &[
+    ("raw", "原样转写"),
+    ("clean", "日常输入"),
+    ("notes", "笔记"),
+];
+
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Term {
+    pub text: String,
+    pub aliases: Vec<String>,
+    pub description: String,
+}
+
+/// Human-editable rows: canonical spelling | comma-separated aliases | context.
+pub fn parse_terms(source: &str) -> Result<Vec<Term>> {
+    let mut terms = Vec::new();
+    for (index, line) in source.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let fields: Vec<_> = line.split('|').map(str::trim).collect();
+        if fields.len() > 3 {
+            bail!(
+                "术语第 {} 行请使用：规范词 | 别名, 别名 | 简短说明",
+                index + 1
+            );
+        }
+        terms.push(Term {
+            text: fields[0].to_owned(),
+            aliases: fields.get(1).map_or_else(Vec::new, |aliases| {
+                aliases
+                    .split([',', '，'])
+                    .map(str::trim)
+                    .filter(|alias| !alias.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            }),
+            description: fields.get(2).copied().unwrap_or_default().to_owned(),
+        });
+    }
+    validate_terms(&terms)?;
+    Ok(terms)
+}
+
+pub fn format_terms(terms: &[Term]) -> String {
+    terms
+        .iter()
+        .map(|term| {
+            format!(
+                "{} | {} | {}",
+                term.text,
+                term.aliases.join(", "),
+                term.description
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn validate_terms(terms: &[Term]) -> Result<()> {
+    if terms.len() > 64 {
+        bail!("个人术语最多 64 条，请保留常用词");
+    }
+    let mut spellings = HashSet::new();
+    for term in terms {
+        if term.aliases.len() > 8 {
+            bail!("术语「{}」最多填写 8 个别名", term.text);
+        }
+        for spelling in std::iter::once(&term.text).chain(term.aliases.iter()) {
+            if spelling.trim().is_empty()
+                || spelling.trim() != spelling
+                || spelling.chars().count() > 80
+                || spelling.chars().any(|c| c.is_control() || c == '|')
+            {
+                bail!("术语和别名须为 1–80 字的单行文字，且不能包含 | 或首尾空格");
+            }
+            if !spellings.insert(spelling.to_lowercase()) {
+                bail!("术语或别名「{spelling}」重复；每种写法只保留一次");
+            }
+        }
+        if term.aliases.iter().any(|alias| alias.contains([',', '，'])) {
+            bail!("别名不能包含逗号；请将不同别名分开填写");
+        }
+        if term.description.chars().count() > 160
+            || term.description.trim() != term.description
+            || term.description.chars().any(|c| c.is_control() || c == '|')
+        {
+            bail!("术语说明最多 160 字，须为单行文字且不能包含 | 或首尾空格");
+        }
+    }
+    if serde_json::to_string(terms)?.chars().count() > 12000 {
+        bail!("术语表内容过长，请精简说明或别名（含格式最多 12000 字）");
+    }
+    Ok(())
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub asr_url: String,
     pub asr_mode: String,
-    pub tts_url: String,
+    pub output_mode: String,
+    pub terms: Vec<Term>,
     pub record_key: String,
-    pub read_key: String,
     pub microphone: String,
     pub continuous_dictation: bool,
-    pub voice: String,
-    pub speed: f32,
+    pub show_note_preview: bool,
     pub silence_ms: u32,
-    pub speech_threshold: f32,
-    pub tts_enabled: bool,
     pub auto_start_services: bool,
 }
 impl Default for Config {
     fn default() -> Self {
         Self {
-            asr_url: "http://127.0.0.1:8001".into(),
             asr_mode: "sensevoice-cpu".into(),
-            tts_url: "http://127.0.0.1:8002".into(),
+            output_mode: "raw".into(),
+            terms: Vec::new(),
             record_key: "Ctrl+Alt+Space".into(),
-            read_key: "Ctrl+Alt+R".into(),
             microphone: String::new(),
             continuous_dictation: false,
-            voice: "default".into(),
-            speed: 1.,
+            show_note_preview: false,
             silence_ms: 700,
-            speech_threshold: 0.008,
-            tts_enabled: false,
             auto_start_services: true,
         }
     }
@@ -62,26 +152,15 @@ impl Config {
         if !ASR_MODES.iter().any(|(mode, _)| *mode == self.asr_mode) {
             bail!("识别模式无效");
         }
-        for address in [&self.asr_url, &self.tts_url] {
-            let url = reqwest::Url::parse(address).context("服务地址无效")?;
-            if url.scheme() != "http"
-                || !matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
-                || !url.username().is_empty()
-                || url.password().is_some()
-            {
-                bail!("初版仅连接本机 HTTP 服务");
-            }
-        }
-        if !(0.5..=2.).contains(&self.speed) {
-            bail!("语速应为 0.5–2.0");
-        }
-        if !(300..=2000).contains(&self.silence_ms)
-            || !(0.001..=0.1).contains(&self.speech_threshold)
+        if !OUTPUT_MODES
+            .iter()
+            .any(|(mode, _)| *mode == self.output_mode)
         {
-            bail!("录音分段设置超出范围");
+            bail!("输出模式无效");
         }
-        if self.record_key == self.read_key {
-            bail!("两个快捷键不能相同");
+        validate_terms(&self.terms)?;
+        if !(300..=2000).contains(&self.silence_ms) {
+            bail!("录音分段设置超出范围");
         }
         Ok(())
     }
@@ -99,10 +178,80 @@ mod tests {
     use super::*;
     #[test]
     fn old_settings_keep_service_start_enabled() {
-        let config: Config = serde_json::from_str(r#"{"voice":"zf_xiaobei"}"#).unwrap();
-        assert!(!config.tts_enabled && config.auto_start_services);
-        assert_eq!(config.voice, "zf_xiaobei");
+        // Fields from removed features (TTS voice, read key, ports) are ignored.
+        let config: Config = serde_json::from_str(
+            r#"{"voice":"zf_xiaobei","read_key":"Ctrl+Alt+R","tts_url":"http://127.0.0.1:8002"}"#,
+        )
+        .unwrap();
+        assert!(config.auto_start_services);
         assert!(!config.continuous_dictation);
+        assert!(!config.show_note_preview);
+        assert_eq!(config.output_mode, "raw");
+        assert!(config.terms.is_empty());
+    }
+
+    #[test]
+    fn terms_roundtrip_with_optional_columns_and_chinese_commas() {
+        let terms = parse_terms("KV cache | key value cache，键值缓存 | attention 缓存\n\nFlashAttention\nBF16 | bfloat sixteen").unwrap();
+        assert_eq!(terms.len(), 3);
+        assert_eq!(terms[0].aliases, ["key value cache", "键值缓存"]);
+        assert_eq!(parse_terms(&format_terms(&terms)).unwrap(), terms);
+        let cfg = Config {
+            output_mode: "clean".into(),
+            terms,
+            ..Config::default()
+        };
+        let restored: Config = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        restored.validate().unwrap();
+        assert_eq!(restored.output_mode, "clean");
+        assert_eq!(restored.terms, cfg.terms);
+        assert!(parse_terms("\n  \n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn terms_reject_ambiguous_or_oversized_context() {
+        for source in [
+            "attention\nAttention",
+            "KV cache | cache\ncache",
+            "foo | shared\nbar | SHARED",
+            " | alias",
+            "foo | bar | note | extra",
+        ] {
+            assert!(parse_terms(source).is_err(), "{source}");
+        }
+        assert!(parse_terms(&"x".repeat(81)).is_err());
+        assert!(parse_terms(&format!("foo | | {}", "说".repeat(161))).is_err());
+        let many = (0..65)
+            .map(|i| format!("term{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(parse_terms(&many).is_err());
+        let aliases = (0..9)
+            .map(|i| format!("alias{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(parse_terms(&format!("foo | {aliases}")).is_err());
+        let total = (0..64)
+            .map(|i| format!("term{i} | | {}", "文".repeat(160)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(parse_terms(&total).is_err());
+        assert!(
+            Config {
+                output_mode: "unknown".into(),
+                ..Config::default()
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            validate_terms(&[Term {
+                text: "foo".into(),
+                aliases: vec!["a,b".into()],
+                description: String::new()
+            }])
+            .is_err()
+        );
     }
     #[test]
     fn continuous_mode_survives_settings_roundtrip() {
@@ -113,6 +262,19 @@ mod tests {
         let restored: Config =
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert!(restored.continuous_dictation);
+    }
+    #[test]
+    fn note_preview_option_survives_settings_roundtrip() {
+        assert!(!Config::default().show_note_preview);
+        for enabled in [false, true] {
+            let config = Config {
+                show_note_preview: enabled,
+                ..Config::default()
+            };
+            let restored: Config =
+                serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+            assert_eq!(restored.show_note_preview, enabled);
+        }
     }
     #[test]
     fn native_mode_validates_and_old_settings_default_to_cpu() {
@@ -145,15 +307,14 @@ mod tests {
         }
     }
     #[test]
-    fn disabled_reading_survives_save_roundtrip() {
+    fn auto_start_disabled_survives_save_roundtrip() {
         let config = Config {
-            tts_enabled: false,
             auto_start_services: false,
             ..Config::default()
         };
         let restored: Config =
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
-        assert!(!restored.tts_enabled && !restored.auto_start_services);
+        assert!(!restored.auto_start_services);
     }
 
     #[test]
@@ -162,14 +323,13 @@ mod tests {
             let config = Config {
                 asr_mode: (*mode).into(),
                 continuous_dictation: true,
-                tts_enabled: false,
                 ..Config::default()
             };
             let restored: Config =
                 serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
             restored.validate().unwrap();
             assert_eq!(restored.asr_mode, *mode);
-            assert!(restored.continuous_dictation && !restored.tts_enabled);
+            assert!(restored.continuous_dictation);
         }
     }
 }

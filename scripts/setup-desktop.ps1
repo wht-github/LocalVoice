@@ -8,7 +8,7 @@ $base = "https://github.com/wht-github/LocalVoice/releases/download/v$version"
 $downloads = Join-Path $root '.runtime/downloads'
 $destination = Join-Path $root '.runtime/desktop'
 $exe = Join-Path $destination 'local-voice-desktop.exe'
-if (Get-Process -Name 'local-voice-desktop' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }) {
+if (Get-Process -Name 'local-voice-desktop*' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and [IO.Path]::GetDirectoryName($_.Path) -eq $destination }) {
     throw '请先从托盘退出当前客户端，再更新 Release。'
 }
 $null = New-Item -ItemType Directory -Force $downloads, $destination
@@ -26,6 +26,14 @@ if (!(Test-Path -LiteralPath $archive)) {
     Move-Item -LiteralPath "$archive.partial" -Destination $archive
 }
 if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $expected) { throw "Release 校验失败，请删除后重试：$archive" }
-Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+$bundle = [IO.Compression.ZipFile]::OpenRead($archive)
+try {
+    foreach ($required in @('local-voice-desktop.exe', 'sherpa-onnx-c-api.dll', 'sherpa-onnx-cxx-api.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll')) {
+        if (!$bundle.GetEntry($required)) {
+            throw "v$version 的 Release 不包含完整原生语音运行库。请执行 ./install.ps1 -LocalBuild 构建源码，再用 ./desktop.ps1 -LocalBuild 启动。"
+        }
+    }
+} finally { $bundle.Dispose() }
+Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force -ErrorAction Stop
 if (!(Test-Path -LiteralPath $exe)) { throw 'Release 包内缺少客户端。' }
 Write-Host "Slint v$version 已就绪：$exe"
