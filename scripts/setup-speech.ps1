@@ -31,11 +31,8 @@ $archive = Join-Path $cache "$name.tar.bz2"
 Get-VerifiedAsset "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$name.tar.bz2" `
     $archive 163002883 '7d1efa2138a65b0b488df37f8b89e3d91a60676e416f515b952358d83dfd347e'
 # Extract only known files from the checksum-verified official archive.
-& tar.exe -xf $archive -C $cache "$name/model.int8.onnx" "$name/tokens.txt"
-if ($LASTEXITCODE -ne 0) { throw 'Cannot extract native SenseVoice model.' }
 $destination = Join-Path $models 'sensevoice-int8'
 New-Item -ItemType Directory -Force $destination | Out-Null
-foreach ($file in @('model.int8.onnx', 'tokens.txt')) {
-    Copy-Item -LiteralPath (Join-Path $cache "$name/$file") -Destination (Join-Path $destination $file) -Force
-}
+& tar.exe -xf $archive -C $destination --strip-components 1 "$name/model.int8.onnx" "$name/tokens.txt"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot extract native SenseVoice model.' }
 Write-Host 'Native SenseVoice INT8 ready.'

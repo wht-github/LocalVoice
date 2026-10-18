@@ -53,6 +53,12 @@ try {
             rustc = "$rustc"; runtime = 'native'; dlls = @($dlls.Name)
         } | ConvertTo-Json -Depth 4) + "`n")
         Add-File (Join-Path $root 'install.md') 'install.md'
+        foreach ($name in @('localvoice.portable', 'Start LocalVoice.cmd', 'Setup Models.cmd')) {
+            Add-File (Join-Path $root "distribution/$name") $name
+        }
+        foreach ($name in @('setup-portable.ps1', 'setup-speech.ps1', 'setup-llama.ps1', 'download-qwen-gguf.ps1')) {
+            Add-File (Join-Path $root "scripts/$name") "scripts/$name"
+        }
         $notices = [Collections.Generic.List[string]]::new()
         $notices.Add("# Third-party components`n")
         $notices.Add('Slint is used under the Slint Royalty-free Desktop, Mobile, and Web Applications License 2.0.')

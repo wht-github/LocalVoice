@@ -17,7 +17,8 @@ impl Detector {
     pub fn new(path: &Path) -> Result<Self> {
         ensure!(
             path.is_file(),
-            "缺少人声检测模型，请运行 install.ps1 安装 Silero VAD"
+            "缺少 Silero 人声检测模型；{}",
+            crate::installation::setup_hint("请运行 scripts/setup-speech.ps1 -VadOnly")
         );
         let config = VadModelConfig {
             silero_vad: SileroVadModelConfig {

@@ -142,8 +142,11 @@ fn qwen_arguments(mode: &str) -> Result<Vec<String>> {
     for path in [&decoder, &encoder] {
         if !path.is_file() {
             bail!(
-                "缺少 {}；请运行 scripts/setup-llama.ps1 和 scripts/download-qwen-gguf.ps1 -Size {size}",
-                path.display()
+                "缺少 {}；{}",
+                path.display(),
+                crate::installation::setup_hint(&format!(
+                    "请运行 scripts/setup-llama.ps1 和 scripts/download-qwen-gguf.ps1 -Size {size}"
+                ))
             );
         }
     }

@@ -454,6 +454,22 @@ pub fn run() -> Result<()> {
             let _ = tx.send(Event::PrepareText);
         }
     });
+    settings.on_install_models({
+        let weak = settings.as_weak();
+        move || {
+            if let Some(settings) = weak.upgrade() {
+                match crate::installation::open_setup() {
+                    Ok(()) => {
+                        settings.set_error("".into());
+                        settings.set_service_status(
+                            "已打开安装窗口；完成后请点击「加载已选模型」".into(),
+                        );
+                    }
+                    Err(error) => settings.set_error(error.to_string().into()),
+                }
+            }
+        }
+    });
     let microphones = Rc::new(RefCell::new(Vec::<String>::new()));
     // Health reads do not load the model or extend its idle lifetime. Refresh
     // only while settings are visible; requests have a shorter timeout than the timer.
@@ -795,6 +811,13 @@ pub fn run() -> Result<()> {
     }
     if let Err(error) = config_result {
         ui.set_status(format!("设置读取失败，使用默认值：{error}").into());
+    }
+    if std::env::args().nth(1).is_none()
+        && crate::installation::inspect()
+            .is_ok_and(|installation| installation.portable && !installation.basic_ready)
+    {
+        let open = open_settings.clone();
+        Timer::single_shot(Duration::from_millis(1), move || open());
     }
     slint::run_event_loop_until_quit()?;
     let _ = tx.send(Event::Quit);

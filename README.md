@@ -1,73 +1,78 @@
-# 本地语音输入
+# LocalVoice · 本地语音输入
 
-Windows 原生 Rust + Slint 悬浮球，用本地模型完成识别、日常轻整理和笔记正文输入。**v0.4.0 的运行与安装流程不需要 Python、pip、uv、PyTorch 或 WSL。** [下载与版本说明](https://github.com/wht-github/LocalVoice/releases/tag/v0.4.0)。
+**按下快捷键，把口述变成文字。** 在 Windows 上用本地模型完成中英混合语音识别、日常轻整理和笔记输入。
 
-| 功能 | 当前实现 | 资源策略 |
+[**下载 Windows x64 版 v0.4.1**](https://github.com/wht-github/LocalVoice/releases/download/v0.4.1/LocalVoice-v0.4.1-windows-x64.zip) · [版本说明](https://github.com/wht-github/LocalVoice/releases/latest) · [安装指南](install.md)
+
+模型准备好后可离线使用，无需账号、API Key、Python 或开发环境。
+
+![LocalVoice 的悬浮操作面板](docs/images/dictation-panel.png)
+
+## 你可以用它做什么
+
+- **随处语音输入**：将光标放进输入框，按 `Ctrl+Alt+Space` 开始说话，再按一次结束，识别完成后自动输入。
+- **中英混合口述**：中文里夹带英文名称、技术术语和缩写。提供 SenseVoice CPU 与可选 Qwen ASR，无需先维护词表。
+- **日常轻整理**：尝试去掉口头语和重复，让消息与工作记录更易读。
+- **完整笔记正文**：说完一段想法，手动结束后整理并输入；以保留原意、形成连贯正文为目标，不使用摘要流程。
+- **随手唤起**：置顶悬浮球、全局快捷键和系统托盘。最近结果可查看完整原文与正文、复制或重新整理。
+- **本地处理**：录音、识别和整理都在电脑上完成。轻量 Silero VAD 判断人声，整理模型按需加载、空闲 60 秒释放。
+
+目前是可试用版本。识别和整理仍可能改错术语、数字或口头修正，建议核对重要内容；新安装默认使用“原样转写”。整理失败、超长或输出截断时回退完整转写。
+
+## 三步开始使用
+
+1. **下载并完整解压**上面的 Windows ZIP，例如解压到 `D:\Apps\LocalVoice`。不要在压缩包里直接运行，也不要只取出 EXE。
+2. **双击 `Start LocalVoice.cmd`**。首次会打开安装窗口，下载并校验基础组件，约 **182 MB**；完成后启动应用。后续双击直接启动。
+3. **把光标放进输入框，按 `Ctrl+Alt+Space`**。说完再按一次，等待文字输入。也可以点击悬浮球里的“开始说话”。
+
+需要 Windows 10 / 11 x64、可写的安装目录，以及首次下载时的网络连接。默认方案无需独立显卡，也无需 Git、Rust、PowerShell 7、CUDA Toolkit 或 Python。若提示缺少 VC++ 运行库，安装 [Microsoft 官方 x64 运行库](https://aka.ms/vc14/vc_redist.x64.exe) 后重试。详细步骤和常见问题见 [安装指南](install.md)。
+
+## 按需准备模型
+
+先完成基础安装，就能使用原样转写。其余能力按需要开启，不会一次下载所有模型。
+
+| 想使用的能力 | 如何准备 | 首次额外下载 |
 | --- | --- | --- |
-| 人声检测 | Silero VAD，经 sherpa-onnx / ONNX Runtime | 629 KiB 模型，CPU 单线程，录音时加载 |
-| 中英混合识别 | Qwen ASR 1.7B / 0.6B Q8，llama.cpp CUDA | 一次加载一个识别模型 |
-| CPU 识别 | SenseVoice INT8，经 sherpa-onnx | 无需独立显卡，无 Python |
-| 轻整理、笔记 | AgenticASR-Refiner Q4_K_M，llama.cpp CPU | 688 MB 权重，4 线程，4096 上下文，空闲 60 秒卸载 |
-| 界面与输入 | Rust + Slint、CPAL、Windows UI Automation | 原生窗口，无 WebView |
+| CPU 语音输入 | 首次启动自动准备 SenseVoice INT8、Silero VAD 和 CPU 推理运行库 | 合计约 **182 MB** |
+| 日常输入、笔记整理 | 设置 → “下载并准备整理模型”，完成后选择相应输出模式 | AgenticASR-Refiner 约 **688 MB**，两种模式共用 |
+| Qwen ASR 0.6B | 双击 `Setup Models.cmd` 选择 0.6B，再在应用设置中切换识别模型 | 权重约 **1.18 GB** + CUDA 运行库约 **540 MB** |
+| Qwen ASR 1.7B | 双击 `Setup Models.cmd` 选择 1.7B，再在应用设置中切换识别模型 | 权重约 **2.81 GB** + 同一套 CUDA 运行库 |
 
-Qwen 和 Agentic 由 Rust 直接启动独立 llama.cpp 进程，使用私有随机回环端口；切换、停止和退出仅清理本应用拥有的模型。SenseVoice 与 Silero 直接在客户端内运行。具体结构及验证见 [原生运行说明](docs/native-runtime.md)。
+Qwen 路线需要兼容所附 CUDA 13.3 运行库的 NVIDIA 显卡与驱动。两套 Qwen 可二选一；安装另一套时复用已准备的 CUDA 运行库。模型下载大小不等于内存占用：Agentic 在前轮本机测试中工作集约 **1.20 GiB**，使用 CPU，不占模型显存。具体表现取决于电脑与口述内容，详见 [模型实测与限制](docs/dictation-evaluation.md)。
 
-## 使用方式
+## 录音与输入怎么工作
 
-- **Ctrl+Alt+Space** 开始／结束录音。日常输入和笔记始终由你手动结束，完成识别和整理后自动输入。等待期间目标发生变化时保留结果供复制。
-- **原样转写**保留口述；**日常输入**做轻整理；**笔记**整理连贯完整正文，不以摘要为目标。模型仍可能改错数字或术语，最近结果保留完整原文供核对、复制或重新整理。
-- 默认不开启停顿提交。可在设置勾选“连续听写（仅原样转写，停顿后输入）”；日常输入和笔记继续手动结束。
-- Silero 用人声模型代替固定音量门限，不再先按音量丢掉轻声。手动录音保留内部停顿，首音前留 400 ms 缓冲，末尾保留约 250 ms。VAD 不是降噪器，真实轻声、键盘声和房间噪声仍需实际试用。
-- 笔记默认不弹对照窗口；设置中可开关“笔记完成后显示对照窗口（调试）”。这不影响自动输入，也可随时打开“最近结果”。
-- 悬浮球与操作面板置顶、不抢输入焦点；托盘可找回窗口、打开设置或退出。
+| 模式 | 结束方式 | 得到什么 |
+| --- | --- | --- |
+| 原样转写 | 默认手动结束；可开启停顿后分段提交 | 识别后的原文 |
+| 日常输入 | 手动结束 | 经过轻整理的完整文字 |
+| 笔记 | 手动结束 | 整理后的完整正文 |
 
-无需维护词表即可使用。可选专名只供 Qwen 识别参考，Agentic 不用词表替换正文。文字整理使用原作者协议，不为固定例句追加纠错规则；失败、超长或输出截断时回退完整转写。
+日常输入和笔记里的停顿不会提前提交。结束后，如果等待期间输入目标发生变化，结果会留在应用里供复制。笔记默认不弹调试对照窗口；需要时可在设置中开启，也可随时打开“最近结果”。
 
-## 安装与启动
+VAD 用于判断人声，不是音频降噪器。自然轻声、键盘声和房间噪声的效果还需要结合实际麦克风试用。
 
-在 Windows x64 的 PowerShell 7 中执行：
+## 数据与更新
 
-```powershell
-git clone https://github.com/wht-github/LocalVoice.git
-cd LocalVoice
-./install.ps1
-./desktop.ps1
-```
+模型、设置和运行日志都保存在程序旁的 `.runtime` 文件夹。录音和转写不自动保存；最近结果仅驻留内存，退出后清空。模型下载需要联网，正常识别与整理不发送音频或正文到云端。
 
-默认安装校验过的预编译 Release，已有 Qwen、Agentic 权重会复用。无 NVIDIA 显卡可用 `./install.ps1 -CpuOnly`。源码构建使用 `./install.ps1 -LocalBuild`，需要 Rust MSVC 和 Visual Studio C++ 构建工具；随后用 `./desktop.ps1 -LocalBuild` 启动。**普通安装不需要这些开发工具或 Python**。详细升级步骤见 [install.md](install.md)。
+更新时先从托盘退出旧版，将新版 ZIP 完整解压并覆盖到同一目录，**保留 `.runtime`**，再双击 `Start LocalVoice.cmd`。已有模型和设置会复用。v0.4.0 及更早的源码目录安装迁移方式见 [安装指南](install.md#从旧版源码目录迁移)。
 
-打开设置选择识别模型。Agentic 缺失时，点击“下载并准备整理模型”才会下载；后续可离线使用。日常与笔记共用权重，按需加载，空闲释放。前轮本机整理模型工作集约 1.20 GiB，模型文件大小不等于运行内存；新的原生回环结果见验证报告。
+## 开发与项目进展
 
-停止全部模型或退出客户端会释放本版本的模型。旧版客户端及其 Python 服务需要从旧版托盘退出；新版不会接管或结束其他进程。不要同时运行两个客户端，以免快捷键冲突或同时占用识别模型显存。
+应用使用 Rust + Slint，录音与 VAD 在原生客户端中执行，SenseVoice 使用 sherpa-onnx，Qwen 与 Agentic 使用由应用管理的 llama.cpp 进程。安装与使用均不依赖 Python；仓库中的历史研究代码不属于应用运行链路。
 
-## 文件与数据
-
-| 位置 | 内容 |
-| --- | --- |
-| `desktop/src` | 录音、VAD、识别、整理、输入和原生模型生命周期 |
-| `.runtime/settings.json` | 模型、模式、快捷键、麦克风及界面偏好 |
-| `.runtime/models/silero-vad` | 轻量人声检测权重 |
-| `.runtime/models/sensevoice-int8` | 原生 CPU 识别权重 |
-| `.runtime/models/Qwen3-ASR-*-GGUF` | Qwen Q8 权重、BF16 音频编码器 |
-| `.runtime/models/AgenticASR-Refiner-GGUF` | 文字整理权重 |
-| `.runtime/llama`、`.runtime/llama-cpu` | 官方 llama.cpp 及配套 DLL |
-| `desktop/target/release` | 本地构建的 EXE、sherpa 和 ONNX Runtime DLL |
-| `.runtime/native-asr.log`、`.runtime/native-text.log` | 模型进程诊断日志 |
-
-录音和转写不自动保存，最近结果仅保留在内存中。历史 Python 服务、下载脚本和评测代码保留用于研究复现，**不参与新版启动、录音、识别或整理**。旧的 8001 HTTP API 不是当前应用接口。
-
-## 验证
+- [源码构建与调试](desktop/README.md)
+- [当前结构与原生运行验证](docs/native-runtime.md)
+- [产品规划与下一步需求](docs/product-roadmap.md)
+- [识别模型选型](docs/asr-engine-selection.md)
 
 ```powershell
 cargo test --manifest-path desktop/Cargo.toml --locked
-./desktop/target/release/local-voice-desktop.exe --vad-check outputs/native-vad-check.json
-./desktop/target/release/local-voice-desktop.exe --native-smoke tests/fixtures/ascend-01219.wav outputs/native-smoke.json
+./install.ps1 -LocalBuild -CpuOnly
+./desktop.ps1 -LocalBuild
 ```
 
-VAD 检查比较真实公开语音、合成衰减、静音和合成噪声，并与旧 RMS 门限对照。原生回环检查使用公开录音，验证 SenseVoice、Qwen 0.6B、Agentic 和进程退出；不采集麦克风、不输入外部应用。这些是回归与部署检查，不是准确率排名；自然轻声和实际应用输入需结合试用验证。
-
-窗口及其他开发检查见 [桌面说明](desktop/README.md)。产品方向见 [产品规划](docs/product-roadmap.md)，历史模型比较见 [口述评测](docs/dictation-evaluation.md) 与 [识别引擎选型](docs/asr-engine-selection.md)。
-
-原 PyTorch / TileLang / Nsight 实验位于 Git 标签 `archive/asr-optimization-20260913`。可选 TTS 已移除，相关记录保留在历史提交。
+源码构建需要 Git、PowerShell 7、Rust MSVC 和 Visual Studio C++ 构建工具。普通用户直接下载上面的 ZIP 即可。第三方许可证随发布包提供。
 
 [![Made with Slint](https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-whitebg.png)](https://slint.dev)

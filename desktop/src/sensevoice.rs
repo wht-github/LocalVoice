@@ -11,7 +11,11 @@ impl Recognizer {
         let tokens = directory.join("tokens.txt");
         for path in [&model, &tokens] {
             if !path.is_file() {
-                bail!("缺少 {}；请运行 scripts/setup-speech.ps1", path.display());
+                bail!(
+                    "缺少 {}；{}",
+                    path.display(),
+                    crate::installation::setup_hint("请运行 scripts/setup-speech.ps1")
+                );
             }
         }
         let mut config = OfflineRecognizerConfig::default();

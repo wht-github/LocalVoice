@@ -60,7 +60,12 @@ impl Server {
             runtime.join("llama/llama-server.exe")
         };
         if !executable.is_file() {
-            bail!("缺少 llama.cpp；请运行 scripts/setup-llama.ps1");
+            bail!(
+                "缺少模型运行库；{}",
+                crate::installation::setup_hint(
+                    "请运行 scripts/setup-llama.ps1；仅需 CPU 整理时追加 -CpuOnly"
+                )
+            );
         }
         // Bind only to choose a free port. A race fails the authenticated handshake;
         // it never attaches to an already-running public model service.

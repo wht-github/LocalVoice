@@ -3,6 +3,7 @@ mod audio;
 mod config;
 mod diagnostics;
 mod download;
+mod installation;
 mod llama;
 mod native;
 mod native_check;
@@ -826,6 +827,10 @@ mod delivery_tests {
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("--installation-check") => installation::check(
+            args.get(2)
+                .ok_or_else(|| anyhow::anyhow!("report path required"))?,
+        ),
         Some("--vad-check") => native_check::run_vad(
             args.get(2)
                 .ok_or_else(|| anyhow::anyhow!("report path required"))?,

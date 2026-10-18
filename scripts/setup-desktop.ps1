@@ -35,5 +35,13 @@ try {
     }
 } finally { $bundle.Dispose() }
 Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force -ErrorAction Stop
+# In a source checkout, reuse the root .runtime rather than creating a nested
+# portable installation beside the downloaded executable.
+foreach ($portableEntry in @('localvoice.portable', 'Start LocalVoice.cmd', 'Setup Models.cmd')) {
+    $portablePath = Join-Path $destination $portableEntry
+    if (Test-Path -LiteralPath $portablePath -PathType Leaf) {
+        Remove-Item -LiteralPath $portablePath
+    }
+}
 if (!(Test-Path -LiteralPath $exe)) { throw 'Release 包内缺少客户端。' }
 Write-Host "Slint v$version 已就绪：$exe"
