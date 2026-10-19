@@ -25,6 +25,7 @@ export component VoiceWindow inherits Window {
     in property <bool> capturing: false;
     in property <bool> processing: false;
     in property <string> output-mode: "raw";
+    in property <bool> continuous-input: false;
     in property <bool> compact: false;
     in property <bool> animation-enabled: true;
     in property <bool> has-pending: false;
@@ -118,7 +119,7 @@ export component VoiceWindow inherits Window {
             Action {width: 100px; height: 28px; label: "最近结果"; clicked => {root.show-result();}}
         }
         Text {
-            text: root.output-mode == "raw" ? "原样转写 · 保留口吻，直接输入" : (root.output-mode == "clean" ? "日常输入 · 手动结束后轻整理并输入" : "笔记 · 手动结束后整理正文并输入");
+            text: root.output-mode == "raw" ? (root.continuous-input ? "原样转写 · 停顿后输入" : "原样转写 · 保留口吻，直接输入") : (root.output-mode == "clean" ? (root.continuous-input ? "日常输入 · 停顿后轻整理并输入" : "日常输入 · 手动结束后轻整理并输入") : "笔记 · 手动结束后整理正文并输入");
             color: #adc4b7; font-size: 11px;
         }
         Rectangle {height: 2px; background: #304039; Rectangle {width: parent.width * root.level; background: #9bd6b1;}}
@@ -185,14 +186,15 @@ export component SettingsWindow inherits Window {
                 Button {text: "安装 / 管理模型"; enabled: !root.services-busy && !root.text-busy; clicked => {root.install-models();}}
                 Text {text: "首次使用先安装基础模型（约 182 MB 下载）。添加 Qwen 后，选择对应识别模型并保存；仅补齐文件时点击「加载已选模型」。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
                 HorizontalLayout { Text {text: "说话快捷键"; width: 90px;} LineEdit {text <=> root.record-key;} }
-                CheckBox {text: "连续听写（仅原样转写，停顿后输入）"; checked <=> root.continuous-dictation;}
-                Text {text: "日常输入和笔记始终手动结束录音，不改变上面的连续听写偏好。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                CheckBox {text: "连续输入（原样转写 / 日常输入）"; checked <=> root.continuous-dictation;}
+                Text {text: "日常输入等待至少 1.2 秒停顿，整段整理完成后输入。长段需要统一整理时关闭此项；笔记始终手动结束。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                Text {text: "连续输入前先选好输入框；检测到窗口或键盘焦点变化时停止录音，后续结果保留供复制。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
                 HorizontalLayout { Text {text: "麦克风"; width: 90px;} ComboBox {model: root.microphones; current-index <=> root.microphone-index;} }
-                Text {text: "Silero 人声检测 · 本地 CPU 单线程。减少噪声误触发，保留说话首尾和句间停顿；不会自动结束日常输入或笔记。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                Text {text: "Silero 人声检测 · 本地 CPU 单线程。手动模式保留句间停顿；连续模式停顿后提交一段，仍需手动结束整次录音。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
                 Rectangle {height: 1px; background: #dce3de;}
                 Text {text: "口语整理与笔记"; font-size: 15px; font-weight: 600;}
-                Text {text: "Agentic · 约 688 MB，CPU 本地处理。首次准备后可离线使用；空闲 60 秒释放模型内存，下次整理自动加载。"; font-size: 12px; wrap: word-wrap;}
-                Text {text: "日常输入和笔记均在结束录音后整理并自动输入；笔记保留完整正文。数字改口和专业术语仍需核对。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
+                Text {text: "Agentic · 约 688 MB，CPU 本地处理。首次准备后可离线使用；录音时预热，空闲 60 秒释放模型内存。"; font-size: 12px; wrap: word-wrap;}
+                Text {text: "日常输入可整段或连续整理，已输入段落不会重写；笔记手动结束后统一整理正文。数字改口和专业术语仍需核对。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
                 CheckBox {text: "笔记完成后显示对照窗口（调试）"; checked <=> root.show-note-preview;}
                 Text {text: "只控制额外显示原文与整理结果，不影响自动输入；关闭后仍可从「最近结果」查看。"; font-size: 11px; wrap: word-wrap; color: #68756d;}
                 Button {text: root.text-busy ? "正在准备整理模型…" : (root.text-ready ? "整理模型已就绪" : (root.text-installed ? "预加载整理模型" : "下载并准备整理模型")); enabled: !root.text-busy && !root.services-busy && !root.text-ready; clicked => {root.prepare-text();}}

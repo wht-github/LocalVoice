@@ -49,6 +49,7 @@ struct State {
     phase: Phase,
     idle_deadline: Option<Instant>,
     shutdown: bool,
+    recording_sessions: usize,
 }
 
 struct Inner {
@@ -64,6 +65,23 @@ pub struct TextProcessor {
     inner: Arc<Inner>,
 }
 
+/// Keep an installed editor ready while the user is recording. Dropping the
+/// session restores the normal idle timeout; it never starts or downloads a model.
+pub struct WarmSession {
+    inner: Arc<Inner>,
+}
+
+impl Drop for WarmSession {
+    fn drop(&mut self) {
+        let mut state = self.inner.state.lock().unwrap();
+        state.recording_sessions -= 1;
+        if state.recording_sessions == 0 && state.phase == Phase::Ready {
+            state.idle_deadline = Some(Instant::now() + Duration::from_secs(IDLE_SECONDS));
+        }
+        self.inner.changed.notify_all();
+    }
+}
+
 impl TextProcessor {
     pub fn new(root: PathBuf) -> Self {
         let inner = Arc::new(Inner {
@@ -76,6 +94,7 @@ impl TextProcessor {
                 phase: Phase::Idle,
                 idle_deadline: None,
                 shutdown: false,
+                recording_sessions: 0,
             }),
             changed: Condvar::new(),
             epoch: AtomicU64::new(0),
@@ -122,6 +141,16 @@ impl TextProcessor {
         self.inner.epoch.load(Ordering::SeqCst)
     }
 
+    pub fn keep_warm(&self) -> WarmSession {
+        let mut state = self.inner.state.lock().unwrap();
+        state.recording_sessions += 1;
+        state.idle_deadline = None;
+        self.inner.changed.notify_all();
+        WarmSession {
+            inner: self.inner.clone(),
+        }
+    }
+
     pub fn prepare_with_ticket(&self, ticket: u64, download: bool) -> Result<String> {
         self.operation_with_ticket(ticket, |ticket| {
             self.ensure_prepared(ticket, download)?;
@@ -135,19 +164,21 @@ impl TextProcessor {
             "notes" => Duration::from_secs(90),
             _ => bail!("未知文字整理模式"),
         };
+        let waiting = Instant::now();
         self.operation_with_ticket(ticket, |ticket| {
+            let operation_wait_seconds = waiting.elapsed().as_secs_f64();
+            let preparation = Instant::now();
+            let ready_before = self.health().ready;
             let server = self.ensure_prepared(ticket, false)?;
-            {
-                let mut state = self.inner.state.lock().unwrap();
-                self.check_cancelled(ticket)?;
-                state.phase = Phase::Processing;
-            }
+            let preparation_seconds = preparation.elapsed().as_secs_f64();
+            self.start_processing(ticket)?;
             let mut body = json!({
                 "messages": [{"role": "system", "content": RULES}, {"role": "user", "content": text}],
                 "stream": false,
                 "chat_template_kwargs": {"enable_thinking": false},
                 "temperature": 0, "seed": 42, "cache_prompt": false, "stop": ["<|im_end|>"]
             });
+            let templating = Instant::now();
             let tokens = (|| -> Result<(usize, usize)> {
                 let template = server.request("/apply-template", &body, Duration::from_secs(5))?;
                 let prompt = template["prompt"].as_str().context("整理模型缺少提示模板")?;
@@ -161,6 +192,8 @@ impl TextProcessor {
             };
             self.check_cancelled(ticket)?;
             body["max_tokens"] = json!(output_budget(prompt_tokens, source_tokens)?);
+            let template_seconds = templating.elapsed().as_secs_f64();
+            let generation = Instant::now();
             let result = match server.request("/v1/chat/completions", &body, timeout) {
                 Ok(result) => result,
                 Err(error) => {
@@ -170,7 +203,17 @@ impl TextProcessor {
                 }
             };
             self.check_cancelled(ticket)?;
-            completed_body(&result)
+            let completed = completed_body(&result);
+            crate::diagnostics::record(
+                "text_stages",
+                json!({"mode":mode, "ready_before":ready_before,
+                    "operation_wait_seconds":operation_wait_seconds,
+                    "preparation_seconds":preparation_seconds,
+                    "template_seconds":template_seconds,
+                    "generation_seconds":generation.elapsed().as_secs_f64(),
+                    "source_tokens":source_tokens, "complete":completed.is_ok()}),
+            );
+            completed
         })
     }
 
@@ -209,7 +252,8 @@ impl TextProcessor {
         if self.inner.epoch.load(Ordering::SeqCst) == ticket && !state.shutdown {
             if state.server.as_ref().is_some_and(|server| server.ready()) {
                 state.phase = Phase::Ready;
-                state.idle_deadline = Some(Instant::now() + Duration::from_secs(IDLE_SECONDS));
+                state.idle_deadline = (state.recording_sessions == 0)
+                    .then(|| Instant::now() + Duration::from_secs(IDLE_SECONDS));
             } else {
                 close_server(&mut state);
             }
@@ -224,6 +268,17 @@ impl TextProcessor {
         if self.inner.epoch.load(Ordering::SeqCst) != ticket {
             bail!("已取消文字整理");
         }
+        Ok(())
+    }
+
+    fn start_processing(&self, ticket: u64) -> Result<()> {
+        let mut state = self.inner.state.lock().unwrap();
+        self.check_cancelled(ticket)?;
+        state.phase = Phase::Processing;
+        // A recording lease may have ended after the operation began while the
+        // previous phase was still Ready. Generation must never inherit its timer.
+        state.idle_deadline = None;
+        self.inner.changed.notify_all();
         Ok(())
     }
 
@@ -246,6 +301,7 @@ impl TextProcessor {
             "{}/{REPO}/resolve/{REVISION}/{FILE}?download=true",
             endpoint.trim_end_matches('/')
         );
+        let verification = Instant::now();
         download::ensure_file(
             &self.inner.model_path,
             &url,
@@ -254,6 +310,7 @@ impl TextProcessor {
             allow_download,
             || self.inner.epoch.load(Ordering::SeqCst) != ticket,
         )?;
+        let file_prepare_seconds = verification.elapsed().as_secs_f64();
         self.check_cancelled(ticket)?;
         let mut arguments = vec![
             "-m".into(),
@@ -292,6 +349,7 @@ impl TextProcessor {
             ]
             .map(str::to_owned),
         );
+        let loading = Instant::now();
         let server = Arc::new(Server::start(
             &arguments,
             "text",
@@ -306,6 +364,11 @@ impl TextProcessor {
         }
         state.server = Some(server.clone());
         state.phase = Phase::Ready;
+        crate::diagnostics::record(
+            "text_model_ready",
+            json!({"file_prepare_seconds":file_prepare_seconds,
+                "load_seconds":loading.elapsed().as_secs_f64(), "device":"cpu"}),
+        );
         Ok(server)
     }
 
@@ -405,6 +468,96 @@ fn edited_body(output: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_lease_defers_idle_timeout_without_overriding_stop() {
+        let processor = TextProcessor::new(std::env::temp_dir().join("local-voice-no-text-model"));
+        {
+            let mut state = processor.inner.state.lock().unwrap();
+            state.phase = Phase::Ready;
+            state.idle_deadline = Some(Instant::now() + Duration::from_secs(60));
+        }
+        let first = processor.keep_warm();
+        let second = processor.keep_warm();
+        assert!(
+            processor
+                .inner
+                .state
+                .lock()
+                .unwrap()
+                .idle_deadline
+                .is_none()
+        );
+        drop(first);
+        assert!(
+            processor
+                .inner
+                .state
+                .lock()
+                .unwrap()
+                .idle_deadline
+                .is_none()
+        );
+        drop(second);
+        assert!(
+            processor
+                .inner
+                .state
+                .lock()
+                .unwrap()
+                .idle_deadline
+                .is_some()
+        );
+
+        let recording = processor.keep_warm();
+        let ticket = processor.ticket();
+        processor.stop();
+        drop(recording);
+        assert!(
+            processor
+                .inner
+                .state
+                .lock()
+                .unwrap()
+                .idle_deadline
+                .is_none()
+        );
+        assert!(processor.prepare_with_ticket(ticket, false).is_err());
+        processor.shutdown();
+    }
+
+    #[test]
+    fn recording_ending_between_preparation_and_generation_cannot_arm_idle_unload() {
+        let processor = TextProcessor::new(std::env::temp_dir().join("local-voice-no-text-model"));
+        processor.inner.state.lock().unwrap().phase = Phase::Ready;
+        let recording = processor.keep_warm();
+        processor
+            .operation_with_ticket(processor.ticket(), |ticket| {
+                drop(recording);
+                assert!(
+                    processor
+                        .inner
+                        .state
+                        .lock()
+                        .unwrap()
+                        .idle_deadline
+                        .is_some()
+                );
+                processor.start_processing(ticket)?;
+                assert!(
+                    processor
+                        .inner
+                        .state
+                        .lock()
+                        .unwrap()
+                        .idle_deadline
+                        .is_none()
+                );
+                Ok(String::new())
+            })
+            .unwrap();
+        processor.shutdown();
+    }
 
     #[test]
     fn metadata_removal_never_repairs_or_rewrites_body() {

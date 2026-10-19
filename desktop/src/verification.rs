@@ -1659,6 +1659,44 @@ pub fn asr_latency(input: &str, output: &str) -> Result<()> {
     Ok(())
 }
 
+/// One fixed developer utterance, identical generation settings. This isolates
+/// preparation from editing; it is neither an ASR benchmark nor a quality score.
+pub fn text_latency(output: &str) -> Result<()> {
+    let processor = crate::text::TextProcessor::new(crate::paths::root()?);
+    let original = "嗯，先把 Unreal 里的 shader cache 清一下，然后重新跑 blueprint 的测试。AGV 的速度不是每秒十米，是每秒一点二米。这个 transition 现在只是初步验证，还没有确认稳定，明天再看 profiler 的结果。";
+    let run = || -> Result<(String, f64)> {
+        let started = Instant::now();
+        let text = processor.process_with_ticket(processor.ticket(), original, "clean")?;
+        Ok((text, started.elapsed().as_secs_f64()))
+    };
+    let result = (|| -> Result<serde_json::Value> {
+        let (cold_body, cold_seconds) = run()?;
+        processor.stop();
+        let recording = processor.keep_warm();
+        let preparation = Instant::now();
+        processor.prepare_with_ticket(processor.ticket(), false)?;
+        let preparation_seconds = preparation.elapsed().as_secs_f64();
+        let (prepared_body, prepared_seconds) = run()?;
+        drop(recording);
+        processor.stop();
+        ensure!(
+            !processor.health().ready,
+            "Editor was not released after Stop"
+        );
+        Ok(serde_json::json!({
+            "original":original,
+            "without_prewarm":{"body":cold_body,"seconds":cold_seconds},
+            "prepared_during_recording":{"body":prepared_body,"preparation_seconds":preparation_seconds,"after_recording_seconds":prepared_seconds},
+            "same_body":cold_body == prepared_body,
+            "stopped":true,
+            "note":"Fixed developer text; identical model/prompt/CPU settings. Preparation is complete before the second request, modelling a sufficiently long recording. Preparation cost is moved, not eliminated. No microphone, user text, ASR, clipboard, or running app is used."
+        }))
+    })();
+    processor.shutdown();
+    std::fs::write(output, serde_json::to_vec_pretty(&result?)?)?;
+    Ok(())
+}
+
 pub fn service_check(output: &str) -> Result<()> {
     let _cleanup = NativeCheck;
     let config = NativeCheck::start("sensevoice-cpu")?;

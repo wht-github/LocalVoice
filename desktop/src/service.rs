@@ -115,6 +115,35 @@ pub fn prepare_text_task() -> Result<impl FnOnce() -> Result<String> + Send + 's
     let ticket = editor.ticket();
     Ok(move || editor.prepare_with_ticket(ticket, true))
 }
+
+pub use crate::text::WarmSession as WarmTextSession;
+
+/// Prepare while the user speaks, using installed files only. Stop invalidates
+/// the ticket before any queued background preparation can load another model.
+pub fn warm_text_session(config: &Config) -> Option<WarmTextSession> {
+    if config.output_mode == "raw" {
+        return None;
+    }
+    let editor = editor().ok()?.clone();
+    let status = editor.health();
+    if !status.installed {
+        return None;
+    }
+    let ticket = editor.ticket();
+    let session = editor.keep_warm();
+    if !status.ready {
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let result = editor.prepare_with_ticket(ticket, false);
+            crate::diagnostics::record(
+                "text_prewarm",
+                serde_json::json!({"seconds":started.elapsed().as_secs_f64(),
+                    "ready":result.is_ok()}),
+            );
+        });
+    }
+    Some(session)
+}
 pub struct TextStatus {
     pub installed: bool,
     pub ready: bool,

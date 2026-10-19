@@ -290,6 +290,7 @@ pub fn run() -> Result<()> {
     slint::platform::set_platform(Box::new(backend))?;
     let ui = VoiceWindow::new()?;
     ui.set_output_mode(config.output_mode.clone().into());
+    ui.set_continuous_input(config.recording_continuous());
     let presentation = Presentation::new(&ui);
     let settings = SettingsWindow::new()?;
     settings.set_app_version(concat!("v", env!("CARGO_PKG_VERSION")).into());
@@ -832,9 +833,13 @@ pub(crate) fn set_compact(ui: &VoiceWindow, compact: bool) {
     repaint_complete(ui.window());
 }
 
-pub(crate) fn set_output(ui: &slint::Weak<VoiceWindow>, mode: &str) {
-    let mode = mode.to_owned();
-    let _ = ui.upgrade_in_event_loop(move |ui| ui.set_output_mode(mode.into()));
+pub(crate) fn set_output(ui: &slint::Weak<VoiceWindow>, config: &Config) {
+    let mode = config.output_mode.clone();
+    let continuous = config.recording_continuous();
+    let _ = ui.upgrade_in_event_loop(move |ui| {
+        ui.set_output_mode(mode.into());
+        ui.set_continuous_input(continuous);
+    });
 }
 
 pub(crate) fn set_result_output(window: &slint::Weak<ResultWindow>, mode: &str) {

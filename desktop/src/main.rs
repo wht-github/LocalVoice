@@ -2,6 +2,7 @@
 mod audio;
 mod config;
 mod diagnostics;
+mod dictation_queue;
 mod download;
 mod installation;
 mod llama;
@@ -17,6 +18,7 @@ mod vad;
 mod verification;
 use anyhow::Result;
 use config::Config;
+use dictation_queue::{AudioQueue, AudioSegment, DeliveryGuard};
 use slint::ComponentHandle;
 use std::{
     collections::VecDeque,
@@ -134,7 +136,7 @@ fn controller(
         }
     };
     let generation = Arc::new(AtomicU64::new(1));
-    let (jobs, job_rx) = mpsc::sync_channel::<Job>(2);
+    let (jobs, job_rx) = mpsc::sync_channel::<Job>(1);
     let replies = events.clone();
     let worker_gen = generation.clone();
     thread::spawn(move || {
@@ -209,6 +211,10 @@ fn controller(
     let mut preparing_text = false;
     let mut preparation_id = 0u64;
     let mut inflight = 0usize;
+    let mut audio_queue = AudioQueue::default();
+    let mut delivery_guard = DeliveryGuard::default();
+    let mut session_failed = false;
+    let mut text_warmth = None;
     let mut stopping = false;
     let mut delivery: VecDeque<(u64, service::Dictation, Instant)> = VecDeque::new();
     loop {
@@ -217,13 +223,66 @@ fn controller(
                 let _ = events.send(Event::Record);
             }
         }
+        if continuous_session
+            && (recording || inflight > 0 || !audio_queue.is_empty() || stopping)
+            && delivery_guard.observe(target.as_ref().is_some_and(|t| automation.matches(t)))
+        {
+            if let Some(c) = capture.take() {
+                c.stop(true);
+                stopping = true;
+            }
+            recording = false;
+            drop(text_warmth.take());
+            status(&ui, "输入目标已变化，已停止录音；剩余结果整理后保留供复制");
+        }
+        if continuous_session && recording && audio_queue.should_pause(Instant::now()) {
+            if let Some(c) = capture.take() {
+                c.stop(true);
+                stopping = true;
+            }
+            recording = false;
+            drop(text_warmth.take());
+            status(&ui, "整理暂时跟不上，已停止录音；所有已收片段继续处理");
+        }
+        // Keep only one job in the worker. Waiting audio remains here so adjacent
+        // segments can share one editor call, and a full worker never drops audio.
+        if inflight == 0 {
+            if let Some(segment) = audio_queue.pop() {
+                let job = Job {
+                    id: generation.load(Ordering::SeqCst),
+                    input: JobInput::Audio(segment.samples, segment.rate),
+                    config: session_config.clone(),
+                    queued_at: segment.queued_at,
+                    preview_only: false,
+                };
+                match jobs.try_send(job) {
+                    Ok(()) => inflight = 1,
+                    Err(mpsc::TrySendError::Full(job)) => {
+                        if let JobInput::Audio(samples, rate) = job.input {
+                            audio_queue.restore_front(AudioSegment {
+                                samples,
+                                rate,
+                                queued_at: job.queued_at,
+                            });
+                        }
+                    }
+                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                        status(&ui, "识别线程已退出，请重启应用后重说本次内容");
+                        if let Some(c) = capture.take() {
+                            c.stop(false);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
         // Fast ASR can finish before the stop shortcut is released. Keep pumping
         // events so Cancel/Quit still work; never synthesize modifier key releases.
         let next = next_event(
             &receiver,
             &mut delivery,
             generation.load(Ordering::SeqCst),
-            native::modifiers_down(),
+            native::modifiers_down() && delivery_guard.allowed(),
         );
         let (event, from_delivery) = match next {
             Ok(event) => event,
@@ -233,6 +292,7 @@ fn controller(
         let current = generation.load(Ordering::SeqCst);
         match event {
             Event::Quit => {
+                drop(text_warmth.take());
                 if let Some(c) = capture.take() {
                     c.stop(false);
                 }
@@ -241,8 +301,13 @@ fn controller(
                 break;
             }
             Event::SelectOutput(mode) => {
-                if recording || inflight > 0 || stopping || preparing_text {
-                    ui::set_output(&ui, &config.output_mode);
+                if recording
+                    || inflight > 0
+                    || !audio_queue.is_empty()
+                    || stopping
+                    || preparing_text
+                {
+                    ui::set_output(&ui, &config);
                     ui::set_result_output(&result_window, &config.output_mode);
                     status(&ui, "请结束当前任务后再切换输出模式");
                     continue;
@@ -259,6 +324,8 @@ fn controller(
                                 "原样转写 · 保留口述表达"
                             } else if config.output_mode == "notes" {
                                 "笔记 · 手动结束后整理正文并输入"
+                            } else if config.recording_continuous() {
+                                "日常输入 · 停顿后轻整理并按顺序输入"
                             } else {
                                 "日常输入 · 手动结束后轻整理并输入"
                             },
@@ -266,11 +333,16 @@ fn controller(
                     }
                     Err(error) => status(&ui, error.to_string()),
                 }
-                ui::set_output(&ui, &config.output_mode);
+                ui::set_output(&ui, &config);
                 ui::set_result_output(&result_window, &config.output_mode);
             }
             Event::PrepareText => {
-                if preparing_text || recording || inflight > 0 || stopping {
+                if preparing_text
+                    || recording
+                    || inflight > 0
+                    || !audio_queue.is_empty()
+                    || stopping
+                {
                     status(&ui, "请先完成当前任务，再准备整理模型");
                     continue;
                 }
@@ -322,7 +394,12 @@ fn controller(
                 }
             }
             Event::RetryText => {
-                if recording || inflight > 0 || stopping || preparing_text {
+                if recording
+                    || inflight > 0
+                    || !audio_queue.is_empty()
+                    || stopping
+                    || preparing_text
+                {
                     status(&ui, "请先完成当前任务，再重新整理");
                     continue;
                 }
@@ -360,7 +437,7 @@ fn controller(
                 };
                 let _ =
                     settings.upgrade_in_event_loop(move |s| s.set_service_status(message.into()));
-                if keys_ready && !recording && inflight == 0 {
+                if keys_ready && !recording && inflight == 0 && audio_queue.is_empty() {
                     match result {
                         Ok(()) => status(&ui, format!("就绪 · {} 说话", config.record_key)),
                         Err(_) => status(&ui, "识别模型未就绪，请在设置中加载模型"),
@@ -368,7 +445,7 @@ fn controller(
                 }
             }
             Event::Runtime(busy, message) => {
-                if !recording && inflight == 0 {
+                if !recording && inflight == 0 && audio_queue.is_empty() {
                     status(&ui, message.clone());
                 }
                 let _ = settings.upgrade_in_event_loop(move |s| {
@@ -377,13 +454,20 @@ fn controller(
                 });
             }
             Event::StartServices => {
-                if recording || inflight > 0 || stopping || preparing_text {
+                if recording
+                    || inflight > 0
+                    || !audio_queue.is_empty()
+                    || stopping
+                    || preparing_text
+                {
                     status(&ui, "请先完成当前任务，再加载模型；停止全部模型可中断任务");
                     continue;
                 }
                 manager.send(runtime::Operation::Start(config.clone()));
             }
             Event::StopServices => {
+                drop(text_warmth.take());
+                audio_queue.clear();
                 stopping = false;
                 if !runtime::managed(&config) {
                     status(&ui, "识别模型类型无效");
@@ -421,34 +505,46 @@ fn controller(
                     break;
                 }
                 if recording {
+                    drop(text_warmth.take());
                     recording = false;
                     stopping = true;
                     // Snapshot immediately on manual stop, before capture teardown.
-                    target = if continuous_session {
-                        None
-                    } else {
+                    if !continuous_session {
                         let destination = automation.target();
                         diagnostics::record(
                             "dictation_stop_target",
                             serde_json::json!({"captured":destination.is_ok(),
                                 "error":destination.as_ref().err().map(|e| e.to_string())}),
                         );
-                        destination.ok()
-                    };
+                        target = destination.ok();
+                    }
                     if let Some(c) = capture.take() {
                         c.stop(true);
                     }
                     status(&ui, "录音已结束，正在识别整段内容…");
                 } else if preparing_text {
                     status(&ui, "正在准备整理模型，请稍候；停止全部模型可中断准备");
-                } else if inflight > 0 || stopping {
+                } else if inflight > 0 || !audio_queue.is_empty() || stopping {
                     status(&ui, "请等待本次识别完成，或点击取消");
                 } else {
                     let id = generation.fetch_add(1, Ordering::SeqCst) + 1;
                     session_config = config.clone();
-                    continuous_session = config.continuous_dictation && config.output_mode == "raw";
-                    session_config.continuous_dictation = continuous_session;
-                    target = None;
+                    continuous_session = config.recording_continuous();
+                    target = if continuous_session {
+                        match automation.target() {
+                            Ok(target) => Some(target),
+                            Err(error) => {
+                                status(&ui, format!("请先选好输入框，再开始连续听写：{error}"));
+                                continue;
+                            }
+                        }
+                    } else {
+                        None
+                    };
+                    audio_queue.clear();
+                    delivery_guard = DeliveryGuard::default();
+                    session_failed = false;
+                    drop(text_warmth.take());
                     capture = Some(audio::Capture::start(
                         session_config.clone(),
                         id,
@@ -464,6 +560,8 @@ fn controller(
                     continue;
                 }
                 stopping = false;
+                drop(text_warmth.take());
+                audio_queue.clear();
                 generation.fetch_add(1, Ordering::SeqCst);
                 if let Some(c) = capture.take() {
                     c.stop(false);
@@ -485,10 +583,13 @@ fn controller(
                 }
             }
             Event::CaptureStarted(id) if id == current && recording => {
+                text_warmth = service::warm_text_session(&session_config);
                 let _ = ui.upgrade_in_event_loop(|ui| ui.set_capturing(true));
                 status(
                     &ui,
-                    if continuous_session {
+                    if continuous_session && session_config.output_mode == "clean" {
+                        "日常连续听写中 · 停顿后轻整理并输入 · 再按结束"
+                    } else if continuous_session {
                         "连续听写中 · 停顿后输入 · 再按结束"
                     } else if session_config.output_mode == "notes" {
                         "笔记录音中 · 选好输入框后，手动结束说话"
@@ -499,10 +600,13 @@ fn controller(
             }
             Event::CaptureStopped(id) if id == current => {
                 stopping = false;
-                if inflight == 0 && !recording {
+                drop(text_warmth.take());
+                if inflight == 0 && audio_queue.is_empty() && !recording {
                     status(
                         &ui,
-                        if pending.is_empty() {
+                        if session_failed {
+                            "部分语音未识别，请复制已有结果并补充缺失内容"
+                        } else if pending.is_empty() {
                             "录音已结束"
                         } else {
                             "结果已保留，请复制后粘贴"
@@ -512,13 +616,17 @@ fn controller(
             }
             Event::CaptureError(id, error) if id == current => {
                 stopping = false;
-                generation.fetch_add(1, Ordering::SeqCst);
-                inflight = 0;
+                drop(text_warmth.take());
+                session_failed = true;
+                delivery_guard.block();
                 if let Some(c) = capture.take() {
                     c.stop(false);
                 }
                 recording = false;
-                status(&ui, format!("麦克风不可用：{error}"));
+                status(
+                    &ui,
+                    format!("录音中断：{error}；已收片段继续处理，请复制结果并补充缺失内容"),
+                );
             }
             Event::Level(id, level) if id == current && recording => {
                 let _ = ui.upgrade_in_event_loop(move |ui| ui.set_level(level));
@@ -536,7 +644,9 @@ fn controller(
             Event::ProcessingText(id) if id == current => {
                 status(
                     &ui,
-                    if session_config.output_mode == "notes" {
+                    if recording && continuous_session {
+                        "连续听写中 · 正在轻整理上一段，保留术语与原意…"
+                    } else if session_config.output_mode == "notes" {
                         "正在整理笔记正文，保留术语与原意…"
                     } else {
                         "正在轻整理，保留术语与原意…"
@@ -544,37 +654,46 @@ fn controller(
                 );
             }
             Event::Audio(id, samples, rate, queued_at) if id == current => {
-                // Include deferred results in the bound, not just HTTP jobs.
-                if inflight < 3
-                    && jobs
-                        .try_send(Job {
-                            id,
-                            input: JobInput::Audio(samples, rate),
-                            config: session_config.clone(),
-                            queued_at,
-                            preview_only: false,
-                        })
-                        .is_ok()
-                {
-                    inflight += 1;
+                let stop_for_backlog = audio_queue.push(
+                    AudioSegment {
+                        samples,
+                        rate,
+                        queued_at,
+                    },
+                    continuous_session,
+                );
+                diagnostics::record(
+                    "dictation_queue",
+                    serde_json::json!({
+                        "generation":id, "queued_audio_seconds":audio_queue.seconds(),
+                        "continuous":continuous_session, "stop_for_backlog":continuous_session && stop_for_backlog,
+                    }),
+                );
+                if continuous_session && stop_for_backlog && recording {
+                    if let Some(c) = capture.take() {
+                        c.stop(true);
+                        stopping = true;
+                    }
+                    recording = false;
+                    drop(text_warmth.take());
+                    status(
+                        &ui,
+                        "待处理录音已达 45 秒，已停止采集；所有已收片段继续整理",
+                    );
+                } else {
                     status(
                         &ui,
                         if recording {
-                            "正在听 · 识别上一段…"
+                            "正在听 · 正在处理上一段…"
                         } else {
-                            "正在识别…"
+                            "正在处理已收录音…"
                         },
                     );
-                } else {
-                    if let Some(c) = capture.take() {
-                        c.stop(false);
-                    }
-                    recording = false;
-                    status(&ui, "识别积压，已暂停录音；最新片段未提交，请重说");
                 }
             }
             Event::Recognized(id, result, returned_at) if id == current => {
                 if result.as_ref().is_ok_and(|value| !value.preview_only)
+                    && delivery_guard.allowed()
                     && (native::modifiers_down() || (!from_delivery && !delivery.is_empty()))
                 {
                     let item = (id, result.unwrap(), returned_at);
@@ -611,16 +730,12 @@ fn controller(
                             ui::show_latest(&result_window, true);
                         } else {
                             let insert_started = Instant::now();
-                            // Continuous input follows the active keyboard destination
-                            // when each result is ready, including after shortcut release.
-                            let inserted = if continuous_session {
-                                Some(
-                                    automation
-                                        .target()
-                                        .and_then(|t| automation.insert(&t, &text)),
-                                )
-                            } else {
+                            // Continuous segments keep the destination captured at
+                            // session start; delayed results never follow a new app.
+                            let inserted = if delivery_guard.allowed() {
                                 target.as_ref().map(|t| automation.insert(t, &text))
+                            } else {
+                                None
                             };
                             diagnostics::record(
                                 "asr_result",
@@ -652,25 +767,22 @@ fn controller(
                                     }
                                     pending.push_str(&text);
                                     target = None;
-                                    // A temporarily unavailable input must not end
-                                    // continuous listening. Keep failed text for Copy.
-                                    if !continuous_session || pending.len() > 256 * 1024 {
+                                    delivery_guard.block();
+                                    // Once a segment cannot be delivered, stop and
+                                    // preserve all later segments in the same order.
+                                    if recording {
                                         if let Some(c) = capture.take() {
-                                            c.stop(false);
+                                            c.stop(true);
+                                            stopping = true;
                                         }
                                         recording = false;
+                                        drop(text_warmth.take());
                                     }
                                     status(
                                         &ui,
                                         match failure {
-                                            _ if continuous_session
-                                                && pending.len() > 256 * 1024 =>
-                                            {
-                                                "待复制文字积累过多，已暂停听写，请先复制保存"
-                                                    .into()
-                                            }
-                                            _ if continuous_session && recording => {
-                                                "此处未能输入，结果已保留 · 连续听写中".into()
+                                            _ if session_failed => {
+                                                "部分语音未识别，已有结果已保留；请复制并补充缺失内容".into()
                                             }
                                             Some(Err(e)) => e.to_string(),
                                             _ => "结果已保留，请复制后粘贴".into(),
@@ -687,26 +799,28 @@ fn controller(
                     }
                     Ok(_) => status(
                         &ui,
-                        if continuous_session && recording {
+                        if session_failed {
+                            "部分语音未识别，请复制已有结果并补充缺失内容"
+                        } else if continuous_session && recording {
                             "连续听写中 · 等待声音…"
                         } else {
                             "未识别到清晰语音"
                         },
                     ),
                     Err(error) => {
-                        if !continuous_session {
-                            if let Some(c) = capture.take() {
-                                c.stop(false);
-                            }
-                            recording = false;
+                        session_failed = true;
+                        delivery_guard.block();
+                        drop(text_warmth.take());
+                        if let Some(c) = capture.take() {
+                            c.stop(true);
+                            stopping = true;
                         }
+                        recording = false;
                         status(
                             &ui,
-                            if continuous_session && recording {
-                                format!("本段识别失败，请重说 · 连续听写中：{error}")
-                            } else {
-                                format!("识别失败，请重说：{error}")
-                            },
+                            format!(
+                                "本段识别失败，请补充重说：{error}；已停止录音，其他片段继续处理并保留供复制"
+                            ),
                         );
                     }
                 }
@@ -715,7 +829,11 @@ fn controller(
                 let result = (|| -> Result<()> {
                     next.validate()?;
                     if (next.asr_mode != config.asr_mode || next.output_mode != config.output_mode)
-                        && (recording || inflight > 0 || stopping || preparing_text)
+                        && (recording
+                            || inflight > 0
+                            || !audio_queue.is_empty()
+                            || stopping
+                            || preparing_text)
                     {
                         anyhow::bail!("请先完成当前任务，再更换模型或输出模式");
                     }
@@ -738,7 +856,7 @@ fn controller(
                         let asr_changed = config.asr_mode != next.asr_mode;
                         config = next;
                         *shared.lock().unwrap() = config.clone();
-                        ui::set_output(&ui, &config.output_mode);
+                        ui::set_output(&ui, &config);
                         ui::set_result_output(&result_window, &config.output_mode);
                         if asr_changed {
                             manager.send(runtime::Operation::Start(config.clone()));
@@ -757,7 +875,7 @@ fn controller(
             }
             _ => {}
         }
-        let processing = inflight > 0 || stopping || preparing_text;
+        let processing = inflight > 0 || !audio_queue.is_empty() || stopping || preparing_text;
         state(&ui, recording, !pending.is_empty(), processing);
         ui::set_result_busy(&result_window, recording || processing);
     }
@@ -910,6 +1028,10 @@ fn main() -> Result<()> {
             args.get(2)
                 .ok_or_else(|| anyhow::anyhow!("input WAV required"))?,
             args.get(3)
+                .ok_or_else(|| anyhow::anyhow!("report path required"))?,
+        ),
+        Some("--text-latency-check") => verification::text_latency(
+            args.get(2)
                 .ok_or_else(|| anyhow::anyhow!("report path required"))?,
         ),
         _ => ui::run(),

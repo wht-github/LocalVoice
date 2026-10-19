@@ -136,6 +136,19 @@ impl Default for Config {
     }
 }
 impl Config {
+    pub fn recording_continuous(&self) -> bool {
+        self.continuous_dictation && matches!(self.output_mode.as_str(), "raw" | "clean")
+    }
+
+    pub fn effective_silence_ms(&self) -> u32 {
+        if self.output_mode == "clean" {
+            // Leave more room for a clause or spoken correction before refining it.
+            self.silence_ms.max(1200)
+        } else {
+            self.silence_ms
+        }
+    }
+
     pub fn path() -> Result<PathBuf> {
         Ok(crate::paths::runtime()?.join("settings.json"))
     }
@@ -262,6 +275,31 @@ mod tests {
         let restored: Config =
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert!(restored.continuous_dictation);
+    }
+    #[test]
+    fn continuous_mode_respects_output_mode_without_changing_saved_preferences() {
+        for (mode, enabled, silence_ms) in [
+            ("raw", true, 700),
+            ("clean", true, 1200),
+            ("notes", false, 700),
+        ] {
+            let config = Config {
+                output_mode: mode.into(),
+                continuous_dictation: true,
+                ..Config::default()
+            };
+            assert_eq!(config.recording_continuous(), enabled);
+            assert_eq!(config.effective_silence_ms(), silence_ms);
+            assert_eq!(config.silence_ms, 700);
+            assert!(config.continuous_dictation);
+        }
+        let longer_pause = Config {
+            output_mode: "clean".into(),
+            silence_ms: 1800,
+            ..Config::default()
+        };
+        assert_eq!(longer_pause.effective_silence_ms(), 1800);
+        assert!(!longer_pause.recording_continuous());
     }
     #[test]
     fn note_preview_option_survives_settings_roundtrip() {

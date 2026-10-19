@@ -73,7 +73,9 @@ fn capture(
     let model = crate::paths::runtime()?.join("models/silero-vad/silero_vad.onnx");
     let mut processor = Processor::new(
         rate,
-        config.continuous_dictation.then_some(config.silence_ms),
+        config
+            .recording_continuous()
+            .then_some(config.effective_silence_ms()),
         &model,
     )?;
     let (sender, receiver) = mpsc::sync_channel(64);
@@ -404,6 +406,33 @@ mod tests {
         feed(&mut s, &vec![0.1; 8000], true);
         assert!(s.finish().unwrap().len() >= 8000);
         assert!(s.finish().is_none());
+    }
+
+    #[test]
+    fn daily_continuous_keeps_a_short_pause_and_following_correction_together() {
+        let mut source = vec![0.1; 16000];
+        source.extend(vec![0.; 14400]); // a pause before a spoken correction
+        source.extend(vec![0.2; 8000]);
+        for (mode, expected_parts) in [("raw", 2), ("clean", 1)] {
+            let config = Config {
+                output_mode: mode.into(),
+                continuous_dictation: true,
+                ..Config::default()
+            };
+            let mut s = Segmenter::new(
+                config
+                    .recording_continuous()
+                    .then_some(config.effective_silence_ms()),
+            );
+            let mut parts = feed(&mut s, &source[..16000], true);
+            parts.extend(feed(&mut s, &source[16000..30400], false));
+            parts.extend(feed(&mut s, &source[30400..], true));
+            parts.extend(s.finish());
+            assert_eq!(parts.len(), expected_parts, "{mode}");
+            if mode == "clean" {
+                assert_eq!(parts[0], source);
+            }
+        }
     }
 
     #[test]
