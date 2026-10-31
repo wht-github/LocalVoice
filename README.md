@@ -66,7 +66,7 @@ VAD 用于判断人声，不是音频降噪器。自然轻声、键盘声和房�
 
 ## 开发与项目进展
 
-应用使用 Rust + Slint，录音与 VAD 在原生客户端中执行，SenseVoice 使用 sherpa-onnx，Qwen 与 Agentic 使用由应用管理的 llama.cpp 进程。安装与使用均不依赖 Python；仓库中的历史研究代码不属于应用运行链路。
+应用使用 Rust + Slint，录音与 VAD 在原生客户端中执行，SenseVoice 使用 sherpa-onnx，Qwen 与 Agentic 使用由应用管理的 llama.cpp 进程。安装与使用均不依赖 Python；历史 Python 研究代码已移除，仓库仅保留原生客户端、安装脚本与文档。
 
 - [源码构建与调试](desktop/README.md)
 - [当前结构与原生运行验证](docs/native-runtime.md)
