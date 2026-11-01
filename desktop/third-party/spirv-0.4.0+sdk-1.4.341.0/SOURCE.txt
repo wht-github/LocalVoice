@@ -1,0 +1,2 @@
+https://github.com/kvark/spirv-reflect-rs/blob/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE-APACHE
+Crate spirv 0.4.0+sdk-1.4.341.0 from https://crates.io/crates/spirv; the published package omits its license file.

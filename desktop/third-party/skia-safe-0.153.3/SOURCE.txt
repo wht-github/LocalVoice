@@ -1,0 +1,2 @@
+https://github.com/rust-skia/rust-skia/blob/b7f043e0b1e2a850e702245de811f01df1f6b0ff/LICENSE
+Crate skia-safe 0.153.3 from https://crates.io/crates/skia-safe; upstream commit b7f043e0b1e2a850e702245de811f01df1f6b0ff.
