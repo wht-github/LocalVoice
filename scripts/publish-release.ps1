@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $releaseDir = $PSScriptRoot
 $repo = 'D:\Workspace\local_voice_app'
 $baseUri = 'https://api.github.com/repos/wht-github/LocalVoice'
-$tag = 'v0.4.2'
+$tag = 'v0.4.3'
 $commit = (& git -C $repo rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot read source commit' }
 $previousPrompt = $env:GIT_TERMINAL_PROMPT
@@ -31,7 +31,7 @@ try {
         $request = @{
             tag_name = $tag
             target_commitish = $commit
-            name = 'LocalVoice v0.4.2 · 连续日常输入与录音预加载'
+            name = 'LocalVoice v0.4.3 · 修复界面不可见（软件渲染）'
             body = Get-Content -LiteralPath (Join-Path $releaseDir 'release-notes.md') -Raw -Encoding UTF8
             draft = $true
             prerelease = $false
@@ -40,7 +40,7 @@ try {
     }
     $release | Select-Object id,html_url,upload_url,tag_name | ConvertTo-Json | Set-Content -LiteralPath $metadataPath -Encoding UTF8
     $uploadUri = $release.upload_url -replace '\{\?name,label\}', ''
-    foreach ($name in @('LocalVoice-v0.4.2-windows-x64.zip', 'SHA256SUMS')) {
+    foreach ($name in @('LocalVoice-v0.4.3-windows-x64.zip', 'SHA256SUMS')) {
         $file = Get-Item -LiteralPath (Join-Path $releaseDir $name)
         $digest = 'sha256:' + (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         $asset = @($release.assets | Where-Object name -eq $name)

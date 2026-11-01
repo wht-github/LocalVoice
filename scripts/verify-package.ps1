@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $repo = 'D:\Workspace\local_voice_app'
-$releaseDir = Join-Path $repo 'outputs\release\v0.4.2'
-$archivePath = Join-Path $releaseDir 'LocalVoice-v0.4.2-windows-x64.zip'
+$releaseDir = Join-Path $repo 'outputs\release\v0.4.3'
+$archivePath = Join-Path $releaseDir 'LocalVoice-v0.4.3-windows-x64.zip'
 $testRoot = (Get-Content -LiteralPath (Join-Path $repo 'outputs\v0.4.1-test-path.txt') -Raw).Trim()
 if (!(Test-Path -LiteralPath $testRoot -PathType Container)) { throw 'Previous portable test installation missing' }
 $modelPath = Join-Path $testRoot '.runtime\models\sensevoice-int8\model.int8.onnx'
@@ -20,7 +20,7 @@ try {
     $reader = [IO.StreamReader]::new($archive.GetEntry('build-info.json').Open())
     try { $build = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
     $commit = (& git -C $repo rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0 -or $build.version -cne '0.4.2' -or $build.commit -cne $commit) { throw 'Build provenance mismatch' }
+    if ($LASTEXITCODE -ne 0 -or $build.version -cne '0.4.3' -or $build.commit -cne $commit) { throw 'Build provenance mismatch' }
 } finally { $archive.Dispose() }
 Expand-Archive -LiteralPath $archivePath -DestinationPath $testRoot -Force
 if ((Get-FileHash -LiteralPath $modelPath -Algorithm SHA256).Hash -cne $modelHashBefore) { throw 'Upgrade changed existing model' }

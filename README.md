@@ -2,7 +2,7 @@
 
 **按下快捷键，把口述变成文字。** 在 Windows 上用本地模型完成中英混合语音识别、日常轻整理和笔记输入。
 
-[**下载 Windows x64 版 v0.4.2**](https://github.com/wht-github/LocalVoice/releases/download/v0.4.2/LocalVoice-v0.4.2-windows-x64.zip) · [版本说明](https://github.com/wht-github/LocalVoice/releases/latest) · [安装指南](install.md)
+[**下载 Windows x64 版 v0.4.3**](https://github.com/wht-github/LocalVoice/releases/download/v0.4.3/LocalVoice-v0.4.3-windows-x64.zip) · [版本说明](https://github.com/wht-github/LocalVoice/releases/latest) · [安装指南](install.md)
 
 模型准备好后可离线使用，无需账号、API Key、Python 或开发环境。
 
@@ -42,7 +42,7 @@ Qwen 路线需要兼容所附 CUDA 13.3 运行库的 NVIDIA 显卡与驱动。�
 
 ## 录音与输入怎么工作
 
-v0.4.2 新增日常连续输入，并在日常或笔记录音期间后台准备整理模型，减少结束后的加载等待。沿用同一 Agentic 模型、提示词和完整输出预算，不将正文改成摘要；录音期间保持模型可用，结束后恢复空闲 60 秒释放。
+v0.4.2 起支持日常连续输入，并在日常或笔记录音期间后台准备整理模型，减少结束后的加载等待。沿用同一 Agentic 模型、提示词和完整输出预算，不将正文改成摘要；录音期间保持模型可用，结束后恢复空闲 60 秒释放。
 
 | 模式 | 结束方式 | 得到什么 |
 | --- | --- | --- |
@@ -62,7 +62,9 @@ VAD 用于判断人声，不是音频降噪器。自然轻声、键盘声和房�
 
 更新时先从托盘退出旧版，将新版 ZIP 完整解压并覆盖到同一目录，**保留 `.runtime`**，再双击 `Start LocalVoice.cmd`。已有模型和设置会复用。v0.4.0 及更早的源码目录安装迁移方式见 [安装指南](install.md#从旧版源码目录迁移)。
 
-**升级提示：** 旧版已开启“连续输入”的设置会保留，v0.4.2 中也会用于日常输入。希望说完后统一整理时，请关闭此项；笔记仍始终手动结束。
+**v0.4.3 修复界面不可见：** 部分 AMD 显示驱动下旧版窗口内容不再显示，按钮位置仍然可以点击。本版改为纯软件渲染，不再经过 OpenGL／Direct3D；此前为绕过该问题手动设置的 `LV_RENDERER` 环境变量可以删除。
+
+**升级提示：** 旧版已开启“连续输入”的设置会保留，日常输入中同样生效。希望说完后统一整理时，请关闭此项；笔记仍始终手动结束。
 
 ## 开发与项目进展
 

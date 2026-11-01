@@ -12,7 +12,13 @@ use tray_icon::{
 };
 use windows::Win32::Foundation::HWND;
 
-pub(crate) const RENDERER: &str = "femtovg";
+// Software rendering only. The UI is tiny - a 64px ball, a 380x166 panel and a 560x640
+// settings form - so softbuffer stays cheap: 0.7% of one core while scrolling the settings
+// window at 200% scaling, ~27 MiB working set. The GPU renderers do not pay off here: the
+// AMD display driver installed on 2026-10-22 (u0205306, 26.10.1) neither composites OpenGL
+// windows nor creates a Direct3D 12 device, and wgpu's working Vulkan path cost ~210 MiB of
+// RAM, +4.8 MiB of binary and the ball's antialiased edge. See docs/desktop-fixes.md.
+pub(crate) const RENDERER: &str = "software";
 
 // The ball is the stable desktop entry. The panel borrows its position and
 // returns there when dismissed, even if expanding near an edge was clamped.

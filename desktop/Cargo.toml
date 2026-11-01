@@ -1,6 +1,6 @@
 [package]
 name = "local-voice-desktop"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 publish = false
 
@@ -10,8 +10,12 @@ base64 = "0.22"
 sha2 = "0.10"
 sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
 png = "0.18"
-slint = { version = "=1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "renderer-software", "compat-1-2", "unstable-winit-030", "raw-window-handle-06"] }
-i-slint-backend-winit = { version = "=1.18.1", default-features = false, features = ["renderer-femtovg", "renderer-software"] }
+# Software rendering only. The GPU renderers were measured and dropped: the installed AMD
+# display driver cannot composite OpenGL windows and fails Direct3D 12 device creation,
+# while wgpu's working Vulkan path cost ~210 MiB of RAM and +4.8 MiB of binary for a UI
+# this small. See docs/desktop-fixes.md (2026-10-31 and 2026-11-01).
+slint = { version = "=1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "compat-1-2", "unstable-winit-030", "raw-window-handle-06"] }
+i-slint-backend-winit = { version = "=1.18.1", default-features = false, features = ["renderer-software"] }
 # Pinned with Slint: invalidate the software surface after restore/display changes.
 i-slint-core = { version = "=1.18.1", default-features = false }
 raw-window-handle = "0.6"

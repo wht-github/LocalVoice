@@ -135,3 +135,59 @@ Codex 聊天框的 ProseMirror 实际是可写 Edit/ValuePattern。直接检查�
 最终发布版 12 个场景全部通过：实际表面与完整重绘的字节差均为 0，尺寸和位置检查通过，报告在 `outputs/desktop/display-after-final/result.json`。既有三次隐藏／恢复检查也均为 0 字节差（`outputs/desktop/display-restore/result.json`）。23 项单元测试通过，包含负坐标显示器、正常位置不移动和窗口大于工作区时的边界检查；发布版已重启，保留原来的 1.7B Q8 模型设置。
 
 测试发送的是合成 Windows 消息，并非真的切换系统分辨率或插拔显示器；它验证显示恢复路径，不能等价为所有显卡驱动、远程桌面、多显示器组合的实测。代码与构建依赖均留在仓库，没有修改 Slint/winit 的全局缓存源码。
+
+## 2026-10-31：OpenGL 窗口无法合成后改用软件渲染
+
+用户反馈运行后界面大部分不可见，但按钮在原来的位置点击仍有反应。
+
+排查：窗口尺寸、焦点、命中区域和点击行为都正常，只有画面不出现。`--snapshot` 导出的悬浮球与设置窗口 PNG 内容完整，说明 FemtoVG 已经把界面画进了离屏目标；用 `LV_RENDERER=software` 运行同一份源码后，悬浮球、展开面板和设置窗口在 200% 缩放的 2560×1600 桌面上正常显示。因此故障发生在 OpenGL 画面进入桌面合成器的环节，不在布局或本程序的绘制代码。
+
+进一步对照（都读取实际桌面，不使用 Slint 快照）：
+
+- 1.17.1 时期的旧 EXE（`desktop/target/release/local-voice-desktop.previous-32156-20261019233934.exe`）同样完全不显示，排除 Slint 1.18.1 升级引入的回归。
+- 独立最小程序：普通 WGL 窗口清屏为品红并 `SwapBuffers`，标题栏出现、客户区始终空白；`glGetString` 报告 `AMD Radeon 780M Graphics`、`4.6.0 Compatibility Profile`，`glCreateShader`／`glGenBuffers`／`glBindVertexArray` 均可取到，`glGetError` 为 0。glutin 落到 EGL 时上下文为 `OpenGL ES 3.2.0`，结果相同；请求桌面 OpenGL 3.3 也相同。即渲染与交换都成功，但没有内容进入桌面合成。
+- 时间点：AMD 显示驱动包 `u0205306`（26.10.1，INF 日期 2026-10-18）安装于 **2026-10-22 22:09**，此后本机任何 OpenGL 窗口都不再显示。本轮排查没有找到属于本程序的触发条件。
+
+处理：默认渲染器改为 Slint 软件渲染器（`desktop/src/ui.rs` 的 `RENDERER = "software"`），`LV_RENDERER=femtovg` 曾保留为驱动修复后的回退开关（该开关与 OpenGL／wgpu 渲染器已在 2026-11-01 一并移除，见下一节）。既有软件渲染修复保持不变：`mark_complete` 在隐藏/恢复、DPI 与显示变化后标记整面重绘；悬浮球仍用 `SetWindowRgn` 裁剪圆形窗口区域。
+
+验证（200% 缩放、2560×1600）：
+
+- 默认启动后实际桌面截图可见悬浮球、展开面板（开始说话／设置／收起／原样转写／日常输入／笔记／最近结果／状态行／取消）和设置窗口全部控件。
+- `cargo test` 54 项通过。
+- `--dictation-ui-check` 生成 12 张面板／设置／结果 PNG，逻辑尺寸与 2 倍物理尺寸均正确。
+- `--floating-check` 全部场景通过：圆形点击区域、透明边缘 428／1564 个 alpha 像素、动效字节差 7020／7066、置顶与不抢焦点。
+- `--display-check` 12 个场景在 100%、150%、200% 下实际表面与完整重绘均为 0 字节差。
+
+限制：只验证了这台机器的真实桌面；驱动修复后 GPU 路径仍需在目标机器上复测。软件渲染的悬浮球圆边没有逐像素 alpha，依靠窗口区域裁剪，边缘质量与 GPU 版本不同。`desktop/README.md` 已同步说明渲染器选择。
+
+## 2026-11-01：放弃 GPU 渲染，只用软件渲染
+
+上一节把默认换成了软件渲染。本轮先确认能否改走 Direct3D／Vulkan（启用 Slint 的 `renderer-femtovg-wgpu`，同一套 FemtoVG 画布经 wgpu 30 输出），再按实测结果决定是否保留。
+
+逐个后端的结果：
+
+- `WGPU_BACKEND=vulkan`：悬浮球、展开面板、设置窗口都在实际桌面正常显示；wgpu 下三条既有检查全部通过（`--floating-check` `all_passed=true`、`--display-check` 12 个场景字节差 0、`--dictation-ui-check` 退出码 0）。
+- `WGPU_BACKEND=dx12`：进程退出（码 1），报 `Error: WGPU initialization failed: Failed to create device: Parent device is lost`，DXGI 侧创建设备失败。
+- 不设 `WGPU_BACKEND`：实例同时启用 DX12 与 Vulkan（Slint 只在非 Windows 平台屏蔽 DX12），能出画面，说明自动落到 Vulkan。
+- 与软件渲染的量测对比（发布版、200% 缩放）：
+
+| 指标 | 软件渲染 | wgpu／Vulkan |
+|---|---|---|
+| 发布版体积 | 14,842,880 字节 | 20,425,728 字节 |
+| 空闲工作集 | 27 MiB | 238 MiB |
+| 私有内存 | 6.1 MiB | 227 MiB |
+| 空闲 CPU | 0.9% 单核 | — |
+| 滚动设置窗口 1120×1280 | 0.7% 单核 | — |
+| `--dictation-ui-check` 全程 | 8.59 s | 10.14 s |
+| 悬浮球圆边 | 逐像素 alpha 抗锯齿 | 只有 Opaque 合成，需裁边 |
+
+wgpu 的 swapchain 在这里只提供 `Opaque` 合成（wgpu 的 DX12 源码标注 TODO，本机 Vulkan 驱动也没有可用的预乘模式），悬浮球那圈 5px 透明边距会变成不透明黑边；临时用 `set_compact_shape` 的 `inset` 参数裁掉，代价是圆边失去抗锯齿。
+
+结论：界面只有一个 128×128 的球、760×332 面板和 1120×1280 设置窗口，GPU 没有可见收益，却要多 5.6 MiB 体积、约 210 MiB 常驻内存和一层驱动依赖，还要牺牲球边抗锯齿。因此只保留软件渲染：
+
+- 依赖里移除 `renderer-femtovg` 与 `renderer-femtovg-wgpu`，OpenGL 与 wgpu 都不再编译；Cargo.lock 相应收缩，发布版比改造前少 530,944 字节。
+- 删除 `LV_RENDERER` 开关、`renderer_supports_alpha()` 和 `set_compact_shape` 的 `inset` 参数；`RENDERER` 固定为 `"software"`，验证模式同样使用。
+
+验证（纯软件构建）：`cargo test` 54 项通过；`--floating-check` `all_passed=true`（`compact-idle` alpha 边缘 428 像素）；`--display-check` 12 个场景字节差 0；`--dictation-ui-check` 退出码 0，12 张 PNG 正常；实际桌面 200% 缩放下悬浮球、展开面板、设置窗口全部可见。
+
+限制：只在当前机器验证。将来若换机器想重新评估 GPU，需要把上面移除的 feature 与开关加回，并按本节的量测方法比较。

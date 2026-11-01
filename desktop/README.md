@@ -1,10 +1,10 @@
 # 本地语音 Windows 客户端
 
-Rust + Slint 原生窗口，使用 FemtoVG / OpenGL GPU 渲染。日常运行不需要 Python、pip、Node.js 或 WebView。Silero VAD 和 SenseVoice 由 Rust 调用 sherpa-onnx / ONNX Runtime；Qwen ASR 与 Agentic 整理使用客户端管理的原生 llama.cpp 子进程。
+Rust + Slint 原生窗口，只用 Slint 软件渲染器绘制（softbuffer），不依赖显卡驱动。GPU 渲染路径经过实测后移除，原因与数据见 [窗口与渲染排查](../docs/desktop-fixes.md) 的 2026-10-31 与 2026-11-01 两节。日常运行不需要 Python、pip、Node.js 或 WebView。Silero VAD 和 SenseVoice 由 Rust 调用 sherpa-onnx / ONNX Runtime；Qwen ASR 与 Agentic 整理使用客户端管理的原生 llama.cpp 子进程。
 
 ## 启动
 
-普通用户使用 v0.4.2 独立便携包，见 [安装说明](../install.md)。已发布标签的源码目录可在项目根用 PowerShell 7 执行 `./install.ps1` 安装对应 Release，再用 `./desktop.ps1` 启动；修改源码后使用下方本地构建流程。预编译版安装与运行无需 Rust、C++ 开发工具或 Python。只用 CPU 可在安装时加 `-CpuOnly`。Rust 客户端按已保存设置在后台加载识别模型；重复运行 PowerShell 入口不会重复启动已运行的客户端。直接运行 EXE 时必须保留配套 DLL；便携包另需保留脚本与 `localvoice.portable` 标记。
+普通用户使用 v0.4.3 独立便携包，见 [安装说明](../install.md)。已发布标签的源码目录可在项目根用 PowerShell 7 执行 `./install.ps1` 安装对应 Release，再用 `./desktop.ps1` 启动；修改源码后使用下方本地构建流程。预编译版安装与运行无需 Rust、C++ 开发工具或 Python。只用 CPU 可在安装时加 `-CpuOnly`。Rust 客户端按已保存设置在后台加载识别模型；重复运行 PowerShell 入口不会重复启动已运行的客户端。直接运行 EXE 时必须保留配套 DLL；便携包另需保留脚本与 `localvoice.portable` 标记。
 
 需要构建当前源码时，安装 Rust MSVC 与 Visual Studio C++ 组件，在项目根目录执行：
 
@@ -21,7 +21,7 @@ Rust + Slint 原生窗口，使用 FemtoVG / OpenGL GPU 渲染。日常运行不
 
 ## 操作
 
-以下功能已包含在 v0.4.2 发布包中。升级保留已有设置；旧版已开启的“连续输入”偏好也会作用于日常输入，需要整段统一整理时请关闭。新配置仍默认原样转写、手动结束。
+以下功能已包含在 v0.4.3 发布包中。升级保留已有设置；旧版已开启的“连续输入”偏好也会作用于日常输入，需要整段统一整理时请关闭。新配置仍默认原样转写、手动结束。
 
 - 输出模式：面板可选“原样转写”“日常输入”“笔记”，与设置中的 ASR 模型分开。已有设置保留，新设置默认原样转写；手动日常输入与笔记在结束后识别完整录音、整理并一次输入结束时的目标。日常也可开启连续输入。等待中目标变更则保留供复制。录音开始时固定本次模式和术语，处理中不能切换模型或模式。
 - 笔记对照窗口：设置的“口语整理与笔记”提供“笔记完成后显示对照窗口（调试）”，默认关闭。开启后先完成交付，再以不激活方式显示对照窗口；关闭不影响自动输入或手动查看最近结果。
